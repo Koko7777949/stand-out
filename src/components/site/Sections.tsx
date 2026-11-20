@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import {
   CalendarDays, Clock, MapPin, Users, Ticket, Share2, Download, BadgeCheck,
   Coins, Trophy, Gift, Zap, Target, ArrowLeft, Lock,
@@ -293,28 +294,43 @@ const FAQS = [
 ]
 
 export function FaqSection() {
+  // Radix useId بيتولد بترقيم مختلف بين السيرفر والكليينت في React 19.2 —
+  // بنصيّر الـ Accordion بعد أول paint عشان نتجنب hydration mismatch (تحت الـ fold أصلًا)
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+
   return (
     <section id="faq" className="mx-auto max-w-4xl px-4 sm:px-6 py-16 sm:py-24" aria-labelledby="faq-title">
       <Reveal>
         <SectionHead tag="FAQ" title="أسئلة بتتكرر… بإجابات مباشرة" />
       </Reveal>
       <Reveal delay={0.08}>
-        <Accordion type="single" collapsible className="space-y-3">
-          {FAQS.map((f, i) => (
-            <AccordionItem
-              key={i}
-              value={`faq-${i}`}
-              className="bg-white nb rounded-2xl px-5 border-none !border-b-0 last:border-none"
-            >
-              <AccordionTrigger className="font-extrabold text-base sm:text-lg py-4 hover:no-underline [&>svg]:h-5 [&>svg]:w-5">
+        {mounted ? (
+          <Accordion type="single" collapsible className="space-y-3">
+            {FAQS.map((f, i) => (
+              <AccordionItem
+                key={i}
+                value={`faq-${i}`}
+                className="bg-white nb rounded-2xl px-5 border-none !border-b-0 last:border-none"
+              >
+                <AccordionTrigger className="font-extrabold text-base sm:text-lg py-4 hover:no-underline [&>svg]:h-5 [&>svg]:w-5">
+                  {f.q}
+                </AccordionTrigger>
+                <AccordionContent className="text-sm font-bold text-muted-foreground leading-relaxed pb-5">
+                  {f.a}
+                </AccordionContent>
+              </AccordionItem>
+            ))}
+          </Accordion>
+        ) : (
+          <div className="space-y-3" aria-hidden>
+            {FAQS.map((f, i) => (
+              <div key={i} className="bg-white nb rounded-2xl px-5 py-4 font-extrabold text-base sm:text-lg text-ink/80">
                 {f.q}
-              </AccordionTrigger>
-              <AccordionContent className="text-sm font-bold text-muted-foreground leading-relaxed pb-5">
-                {f.a}
-              </AccordionContent>
-            </AccordionItem>
-          ))}
-        </Accordion>
+              </div>
+            ))}
+          </div>
+        )}
       </Reveal>
     </section>
   )
