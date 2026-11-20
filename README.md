@@ -110,7 +110,7 @@ bun run lint
 
 | المزود | الاختيار في اللوحة | المطلوب | صيغة الطلب الفعلية |
 |---|---|---|---|
-| **UltraMsg** (الأسهل لمصر) | `ultramsg` | Instance ID + Token | `POST https://api.ultramsg.com/{instance}/messages/chat` — JSON: `{"token","to":"201200506224","body":"كود التحقق..."}` — النجاح: `{"sent":"true","id":"..."}` |
+| **UltraMsg** (الأسهل لمصر — **المزود المربوط افتراضيًا**) | `ultramsg` | Instance ID + Token | `POST https://api.ultramsg.com/{instance}/messages/chat` — JSON بالصيغة الرسمية: `{"token":"…","to":"201200506224","body":"كود التحقق…","priority":10,"referenceId":"","msgId":"","mentions":""}` — النجاح: `{"sent":"true","id":"…"}` والرفض: `{"success":"false","error":"…"}` |
 | **Meta Cloud API** (الرسمي) | `meta` | Access Token + Phone Number ID | `POST https://graph.facebook.com/v21.0/{phoneId}/messages` — `Authorization: Bearer …` — نص حر جوه نافذة 24 ساعة، أو Template معتمد بمتغير `{{1}}` (يُكتب اسمه في اللوحة فيُرسل `{type:"template", components:[{type:"body", parameters:[{type:"text", text:"123456"}]}]}`) |
 | **Green API** | `greenapi` | Instance + Token | `POST https://api.green-api.com/waInstance{id}/sendMessage/{token}` — `{"chatId":"201200506224@c.us","message":"…"}` |
 | **Twilio WhatsApp** | `twilio` | Account SID + Auth Token + From | `POST https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json` — Basic Auth — `From=whatsapp:+14155238886&To=whatsapp:+2012…&Body=…` |
@@ -119,6 +119,25 @@ bun run lint
 - الأرقام تُحوَّل تلقائيًا للصيغة الدولية: `01200506224` ← `201200506224`.
 - **لو واتساب غير مربوط أو فشل الإرسال**: يُجرَّب SMS عبر **SMSMisr** تلقائيًا (`POST https://smsmisr.com/api/SMS` — form-urlencoded: `environment, username, password, token, Phone, Message, sender, language` — النجاح: `{"code":"1901"}`)، أو بوابة SMS مخصصة (Victory Links أو غيرها) عبر `smsGatewayUrl`.
 - **وضع التطوير**: لو لا مزود مربوط، الكود يظهر على الشاشة (Dev Hint) حتى تختبر كامل الرحلة. في الإنتاج: مربّط مزود حقيقي + شغّل `hideDevOtp` من تاب الإعدادات فيختفي تمامًا.
+
+### ربط UltraMsg خطوة بخطوة (واتساب)
+
+1. اعمل حساب على [ultramsg.com](https://ultramsg.com) وأنشئ **Instance** جديدًا، ثم اربط رقم الواتساب الخاص بالـ Instance بمسح QR من تطبيق واتساب.
+2. من صفحة الـ Instance انسخ `Instance ID` (مثل `instance95000`) و `Token`.
+3. أدخلهم من أي مكان فيهم:
+   - **لوحة الأدمن** ← تاب **الإعدادات** ← مزود واتساب = `ultramsg` ← خانتي Instance/Token ← حفظ (بدون إعادة تشغيل)، أو
+   - ملف `.env` على السيرفر ثم أعد تشغيل التطبيق:
+     ```
+     ULTRAMSG_INSTANCE="instance95000"
+     ULTRAMSG_TOKEN="your-token-here"
+     ```
+4. من تاب الإعدادات اضغط **تجربة واتساب** واكتب رقمك — لو الرسالة وصلت يبقى كل أكواد الدخول هتوصل واتساب فورًا.
+5. قبل الإطلاق الفعلي فعّل `hideDevOtp` من نفس التاب حتى لا يظهر كود التحقق على الشاشة أبدًا.
+
+ملاحظات:
+- الطلب المرسل **مطابق للمثال الرسمي للمزود**: `token` + `to` + `body` + `priority: 10` + `referenceId` + `msgId` + `mentions` — والرقم بيتبعت دوليًا `201200506224`.
+- UltraMsg أحيانًا يرد `HTTP 200` مع `{"success":"false","error":"…"}` — النظام بيكتشف الرفض ده وبيحوّل للـ SMS الاحتياطي تلقائيًا، وبيسجّل الخطأ في السجل.
+- الـ Instance لازم يكون متصل (الجهاز اللي فيه واتساب مربوط) — لو فصل، الرسائل هتفشل وهيتحول الإرسال لـ SMSMisr لو مربوط.
 
 ### Email — Resend
 

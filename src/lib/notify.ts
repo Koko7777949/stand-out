@@ -56,22 +56,55 @@ function brandedEmailHtml(subject: string, code: string): string {
 // ===================== WhatsApp =====================
 
 // UltraMsg — أسهل وأرخص مزود واتساب لمصر: instance + token من لوحة الحساب
+// الطلب مطابق للمثال الرسمي بالحرف — كل الحقول موجودة حتى الفاضية منها:
+// { token, to, body, priority, referenceId, msgId, mentions }
 async function sendViaUltraMsg(to: string, message: string): Promise<boolean> {
   const s = await getSettings()
-  const instance = s.ultramsgInstance || process.env.ULTRAMSG_INSTANCE || ''
-  const token = s.ultramsgToken || process.env.ULTRAMSG_TOKEN || ''
+  const instance = (s.ultramsgInstance || process.env.ULTRAMSG_INSTANCE || '').trim()
+  const token = (s.ultramsgToken || process.env.ULTRAMSG_TOKEN || '').trim()
   if (!instance || !token) return false
   try {
     const res = await fetch(`https://api.ultramsg.com/${encodeURIComponent(instance)}/messages/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, to: toInternationalPhone(to), body: message }),
+      body: JSON.stringify({
+        token,
+        to: toInternationalPhone(to),
+        body: message,
+        priority: 10,
+        referenceId: '',
+        msgId: '',
+        mentions: '',
+      }),
       signal: timeout(12000),
     })
-    if (!res.ok) return false
-    const data = (await res.json().catch(() => null)) as { sent?: boolean | string; id?: string } | null
-    return data?.sent === true || data?.sent === 'true' || !!data?.id
-  } catch {
+    if (!res.ok) {
+      console.error(`[ultramsg] HTTP ${res.status}`)
+      return false
+    }
+    const data = (await res.json().catch(() => null)) as {
+      sent?: boolean | string; success?: boolean | string; id?: string; MessageID?: string; error?: string | null
+    } | null
+    // UltraMsg ممكن يرد HTTP 200 مع {"success":"false","error":"..."} — نفحص الرفض الصريح الأول
+    const rejected =
+      !data ||
+      String(data.sent ?? '') === 'false' ||
+      String(data.success ?? '') === 'false' ||
+      (typeof data.error === 'string' && data.error.trim() !== '')
+    if (rejected) {
+      console.error('[ultramsg] rejected:', JSON.stringify(data))
+      return false
+    }
+    return (
+      data.sent === true ||
+      String(data.sent) === 'true' ||
+      data.success === true ||
+      String(data.success) === 'true' ||
+      !!data.id ||
+      !!data.MessageID
+    )
+  } catch (err) {
+    console.error('[ultramsg] request failed:', err)
     return false
   }
 }
