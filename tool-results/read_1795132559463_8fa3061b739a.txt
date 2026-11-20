@@ -1,0 +1,1266 @@
+     1→'use client'
+     2→
+     3→import { useCallback, useEffect, useState } from 'react'
+     4→import {
+     5→  LayoutDashboard, Wallet, CalendarPlus, Landmark, Users, ShieldUser,
+     6→  Gift, Settings2, Loader2, RefreshCw, Check, X, Power, Trash2, Pencil,
+     7→  Search, Plus, Send, Ban, Coins, ShieldAlert, Eye, Copy, CheckCircle2, KeyRound,
+     8→} from 'lucide-react'
+     9→import { Button } from '@/components/ui/button'
+    10→import { Input } from '@/components/ui/input'
+    11→import { Label } from '@/components/ui/label'
+    12→import { Switch } from '@/components/ui/switch'
+    13→import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+    14→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+    15→import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+    16→import { Textarea } from '@/components/ui/textarea'
+    17→import { api } from '@/lib/client-api'
+    18→import { egp } from '@/lib/types'
+    19→import { toast } from 'sonner'
+    20→import { Reveal } from './Reveal'
+    21→
+    22→// ---------- أنواع البيانات ----------
+    23→type Overview = {
+    24→  stats: {
+    25→    users: number; banned: number; admins: number; ticketsIssued: number; ticketsHeld: number
+    26→    ordersPaid: number; revenueMinor: number; pendingPayments: number; reviewReferrals: number
+    27→    qualifiedReferrals: number; pendingRedemptions: number
+    28→  }
+    29→  activeEvent: { name: string; slug: string; soldCount: number; capacity: number } | null
+    30→  audit: { id: string; action: string; entity: string; detail?: string; createdAt: string }[]
+    31→}
+    32→type AdminEvent = {
+    33→  id: string; slug: string; name: string; startsAt: string; venue: string; city: string
+    34→  active: boolean; capacity: number; heldCount: number; soldCount: number; priceMinor: number
+    35→  holdMinutes: number; bookingOpensAt: string; bookingClosesAt: string
+    36→  ageMin: number; ageMax: number; settings: Record<string, string>
+    37→}
+    38→type Account = {
+    39→  id: string; method: string; label: string; accountName: string; accountNumber: string
+    40→  instructions?: string | null; active: boolean; sortOrder: number
+    41→}
+    42→type PaymentRow = {
+    43→  id: string; method: string; amountMinor: number; reference: string; providerRef: string; createdAt: string
+    44→  order: {
+    45→    id: string; status: string; holdExpiresAt: string | null
+    46→    user: { id: string; name: string; phone: string | null; email: string | null }
+    47→    ticket: { serial: string; holderName: string; governorate: string } | null
+    48→  }
+    49→}
+    50→type ReviewReferral = {
+    51→  id: string; createdAt: string; fraudFlags: string
+    52→  referrer: { id: string; name: string; phone: string | null }
+    53→  referredUser: { id: string; name: string; phone: string | null; email: string | null }
+    54→}
+    55→type UserRow = {
+    56→  id: string; name: string; phone: string | null; email: string | null; role: string; status: string
+    57→  provider: string; referralCode: string; createdAt: string; lastLoginAt: string | null
+    58→  ticketsCount: number; referrals: number; points: number
+    59→}
+    60→type AdminRow = {
+    61→  id: string; name: string; phone: string | null; email: string | null; role: string; status: string
+    62→  createdAt: string; lastLoginAt: string | null; activeSessions: number
+    63→}
+    64→type RedemptionRow = {
+    65→  id: string; status: string; pointsSpent: number; createdAt: string; fulfilledAt: string | null
+    66→  user: { id: string; name: string; phone: string | null; email: string | null }
+    67→  reward: { id: string; name: string; pointsCost: number }
+    68→}
+    69→type SettingsData = Record<string, string> & {
+    70→  smsConfigured?: boolean
+    71→  emailConfigured?: boolean
+    72→  adminPasswordSet?: boolean
+    73→}
+    74→
+    75→const METHOD_LABELS: Record<string, string> = {
+    76→  instapay: 'InstaPay', vodafone_cash: 'Vodafone Cash', orange_cash: 'Orange Cash',
+    77→  etisalat_cash: 'e& money', we_pay: 'WE Pay',
+    78→}
+    79→
+    80→function toLocalInput(iso: string): string {
+    81→  const d = new Date(iso)
+    82→  const pad = (n: number) => String(n).padStart(2, '0')
+    83→  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+    84→}
+    85→
+    86→// ---------- لوحة التحكم ----------
+    87→export function AdminPanel({ isSuper }: { isSuper: boolean }) {
+    88→  return (
+    89→    <section className="mx-auto max-w-6xl px-4 sm:px-6 py-10 sm:py-14 w-full" aria-labelledby="admin-title">
+    90→      <Reveal>
+    91→        <div className="mb-6">
+    92→          <span className="inline-block bg-ink text-lime font-serial font-bold text-xs tracking-[0.25em] rounded-lg px-3 py-1.5 mb-4" dir="ltr">
+    93→            ADMIN CONSOLE
+    94→          </span>
+    95→          <h1 id="admin-title" className="text-3xl sm:text-4xl font-extrabold">لوحة تحكم Stand Out</h1>
+    96→          <p className="text-sm font-bold text-muted-foreground mt-2">
+    97→            التحكم الكامل في النظام — الايفنتات، حسابات استلام الفلوس، الدفعات، والمسؤولين.
+    98→          </p>
+    99→        </div>
+   100→      </Reveal>
+   101→
+   102→      <Tabs defaultValue="overview" dir="rtl">
+   103→        <TabsList className="flex flex-wrap h-auto gap-1 bg-lilac border-[2.5px] border-ink rounded-2xl p-1.5 mb-6 justify-start">
+   104→          {[
+   105→            { v: 'overview', label: 'نظرة عامة', icon: LayoutDashboard },
+   106→            { v: 'payments', label: 'الدفعات', icon: Wallet },
+   107→            { v: 'events', label: 'الايفنتات', icon: CalendarPlus },
+   108→            { v: 'accounts', label: 'حسابات الاستلام', icon: Landmark },
+   109→            { v: 'users', label: 'المستخدمين', icon: Users },
+   110→            ...(isSuper ? [{ v: 'admins', label: 'المسؤولين', icon: ShieldUser }] : []),
+   111→            { v: 'redemptions', label: 'الاستبدالات', icon: Gift },
+   112→            { v: 'settings', label: 'الإعدادات', icon: Settings2 },
+   113→          ].map((t) => (
+   114→            <TabsTrigger
+   115→              key={t.v}
+   116→              value={t.v}
+   117→              className="gap-1.5 font-extrabold text-xs data-[state=active]:bg-white data-[state=active]:border-2 data-[state=active]:border-ink rounded-lg min-h-[40px] px-3"
+   118→            >
+   119→              <t.icon className="h-3.5 w-3.5" aria-hidden />
+   120→              {t.label}
+   121→            </TabsTrigger>
+   122→          ))}
+   123→        </TabsList>
+   124→
+   125→        <TabsContent value="overview"><OverviewTab /></TabsContent>
+   126→        <TabsContent value="payments"><PaymentsTab /></TabsContent>
+   127→        <TabsContent value="events"><EventsTab /></TabsContent>
+   128→        <TabsContent value="accounts"><AccountsTab /></TabsContent>
+   129→        <TabsContent value="users"><UsersTab /></TabsContent>
+   130→        {isSuper && <TabsContent value="admins"><AdminsTab /></TabsContent>}
+   131→        <TabsContent value="redemptions"><RedemptionsTab /></TabsContent>
+   132→        <TabsContent value="settings"><SettingsTab isSuper={isSuper} /></TabsContent>
+   133→      </Tabs>
+   134→    </section>
+   135→  )
+   136→}
+   137→
+   138→// ---------- تبويب: نظرة عامة ----------
+   139→function OverviewTab() {
+   140→  const [data, setData] = useState<Overview | null>(null)
+   141→  const [loading, setLoading] = useState(true)
+   142→
+   143→  const load = useCallback(async () => {
+   144→    setLoading(true)
+   145→    try {
+   146→      setData(await api<Overview>('/api/admin/overview'))
+   147→    } catch (e) {
+   148→      toast.error(e instanceof Error ? e.message : 'مشكلة في التحميل')
+   149→    } finally {
+   150→      setLoading(false)
+   151→    }
+   152→  }, [])
+   153→
+   154→  useEffect(() => { load() }, [load])
+   155→
+   156→  if (loading) return <CenterSpinner />
+   157→  if (!data) return null
+   158→
+   159→  const s = data.stats
+   160→  const cards = [
+   161→    { label: 'المستخدمين', value: s.users, sub: `${s.banned} موقوف · ${s.admins} مسؤول`, cls: 'bg-lilac' },
+   162→    { label: 'تذاكر صادرة', value: s.ticketsIssued, sub: `${s.ticketsHeld} في انتظار الدفع`, cls: 'bg-lime' },
+   163→    { label: 'إجمالي التحصيل', value: egp(s.revenueMinor), sub: `${s.ordersPaid} عملية مؤكدة`, cls: 'bg-peach' },
+   164→    { label: 'دفعات معلّقة', value: s.pendingPayments, sub: 'محتاجة تأكيد منك', cls: 'bg-white' },
+   165→    { label: 'إحالات مؤهلة', value: s.qualifiedReferrals, sub: `${s.reviewReferrals} تحت المراجعة`, cls: 'bg-lilac' },
+   166→    { label: 'طلبات استبدال', value: s.pendingRedemptions, sub: 'في انتظار التسليم', cls: 'bg-white' },
+   167→  ]
+   168→
+   169→  return (
+   170→    <div className="space-y-5">
+   171→      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+   172→        {cards.map((c, i) => (
+   173→          <Reveal key={c.label} delay={i * 0.04}>
+   174→            <div className={`${c.cls} nb nb-pop rounded-2xl p-5`}>
+   175→              <p className="text-2xl sm:text-3xl font-extrabold" dir={c.label === 'إجمالي التحصيل' ? 'rtl' : 'ltr'}>{c.value}</p>
+   176→              <p className="text-sm font-extrabold mt-1">{c.label}</p>
+   177→              <p className="text-xs font-bold text-ink/60 mt-0.5">{c.sub}</p>
+   178→            </div>
+   179→          </Reveal>
+   180→        ))}
+   181→      </div>
+   182→
+   183→      <Reveal delay={0.1}>
+   184→        <div className="bg-white nb rounded-2xl p-5">
+   185→          <div className="flex items-center justify-between mb-3">
+   186→            <p className="font-extrabold text-sm">الايفنت المفعّل حاليًا (الظاهر للعامة)</p>
+   187→            {data.activeEvent ? (
+   188→              <span className="bg-lime border-2 border-ink rounded-lg px-3 py-1 text-xs font-extrabold">شغّال</span>
+   189→            ) : (
+   190→              <span className="bg-peach border-2 border-ink rounded-lg px-3 py-1 text-xs font-extrabold">مفيش ايفنت مفعّل</span>
+   191→            )}
+   192→          </div>
+   193→          {data.activeEvent ? (
+   194→            <p className="text-sm font-bold text-muted-foreground">
+   195→              {data.activeEvent.name} — اتحجز {data.activeEvent.soldCount} من {data.activeEvent.capacity} مقعد
+   196→            </p>
+   197→          ) : (
+   198→            <p className="text-sm font-bold text-muted-foreground">فعّل ايفنت من تبويب الايفنتات عشان يظهر للحجز.</p>
+   199→          )}
+   200→        </div>
+   201→      </Reveal>
+   202→
+   203→      <Reveal delay={0.15}>
+   204→        <div className="bg-white nb rounded-2xl p-5">
+   205→          <p className="font-extrabold text-sm mb-3 flex items-center gap-1.5">
+   206→            <Eye className="h-4 w-4 text-grape" aria-hidden /> آخر حركات الإدارة (سجل التدقيق)
+   207→          </p>
+   208→          <div className="space-y-2 max-h-72 overflow-y-auto nice-scroll">
+   209→            {data.audit.length === 0 ? (
+   210→              <p className="text-sm font-bold text-muted-foreground py-4 text-center">لسه مفيش حركات.</p>
+   211→            ) : (
+   212→              data.audit.map((a) => (
+   213→                <div key={a.id} className="flex items-center justify-between gap-2 rounded-xl bg-lilac/40 border-2 border-ink/40 px-3 py-2">
+   214→                  <span className="text-xs font-bold" dir="ltr">{a.action}{a.detail ? ` — ${a.detail}` : ''}</span>
+   215→                  <span className="text-[10px] font-bold text-muted-foreground shrink-0" dir="ltr">
+   216→                    {new Date(a.createdAt).toLocaleString('ar-EG')}
+   217→                  </span>
+   218→                </div>
+   219→              ))
+   220→            )}
+   221→          </div>
+   222→        </div>
+   223→      </Reveal>
+   224→    </div>
+   225→  )
+   226→}
+   227→
+   228→// ---------- تبويب: الدفعات + مراجعة الإحالات ----------
+   229→function PaymentsTab() {
+   230→  const [payments, setPayments] = useState<PaymentRow[]>([])
+   231→  const [referrals, setReferrals] = useState<ReviewReferral[]>([])
+   232→  const [loading, setLoading] = useState(true)
+   233→  const [busyId, setBusyId] = useState<string | null>(null)
+   234→
+   235→  const load = useCallback(async () => {
+   236→    setLoading(true)
+   237→    try {
+   238→      const r = await api<{ payments: PaymentRow[]; reviewReferrals: ReviewReferral[] }>('/api/admin/payments')
+   239→      setPayments(r.payments || [])
+   240→      setReferrals(r.reviewReferrals || [])
+   241→    } catch (e) {
+   242→      toast.error(e instanceof Error ? e.message : 'مشكلة في التحميل')
+   243→    } finally {
+   244→      setLoading(false)
+   245→    }
+   246→  }, [])
+   247→
+   248→  useEffect(() => { load() }, [load])
+   249→
+   250→  const act = async (id: string, action: 'complete' | 'fail') => {
+   251→    setBusyId(id)
+   252→    try {
+   253→      await api(`/api/admin/payments/${id}`, { body: { action } })
+   254→      toast.success(action === 'complete' ? 'اتأكدت الدفعة — التذكرة اتفعّلت للعميل.' : 'الدفعة اترفضت.')
+   255→      await load()
+   256→    } catch (e) {
+   257→      toast.error(e instanceof Error ? e.message : 'مشكلة في التنفيذ')
+   258→    } finally {
+   259→      setBusyId(null)
+   260→    }
+   261→  }
+   262→
+   263→  const reviewReferral = async (id: string, action: 'approve' | 'reject') => {
+   264→    setBusyId(id)
+   265→    try {
+   266→      await api(`/api/admin/referrals/${id}`, { body: { action } })
+   267→      toast.success(action === 'approve' ? 'الإحالة اتأكدت والنقاط اتحسبت.' : 'الإحالة اترفضت.')
+   268→      await load()
+   269→    } catch (e) {
+   270→      toast.error(e instanceof Error ? e.message : 'مشكلة في التنفيذ')
+   271→    } finally {
+   272→      setBusyId(null)
+   273→    }
+   274→  }
+   275→
+   276→  if (loading) return <CenterSpinner />
+   277→
+   278→  return (
+   279→    <div className="space-y-6">
+   280→      <div className="bg-white nb rounded-2xl p-5">
+   281→        <div className="flex items-center justify-between mb-4">
+   282→          <p className="font-extrabold text-sm flex items-center gap-1.5">
+   283→            <Wallet className="h-4 w-4 text-grape" aria-hidden /> دفعات في انتظار التأكيد ({payments.length})
+   284→          </p>
+   285→          <Button variant="outline" size="sm" onClick={load} className="gap-1.5 font-bold border-2 border-ink rounded-lg bg-white hover:bg-lilac/50">
+   286→            <RefreshCw className="h-3.5 w-3.5" aria-hidden /> تحديث
+   287→          </Button>
+   288→        </div>
+   289→        {payments.length === 0 ? (
+   290→          <p className="text-sm font-bold text-muted-foreground py-6 text-center">مفيش دفعات معلّقة — كل حاجة منتظمة.</p>
+   291→        ) : (
+   292→          <div className="space-y-3 max-h-[480px] overflow-y-auto nice-scroll">
+   293→            {payments.map((p) => (
+   294→              <div key={p.id} className="rounded-xl border-[2.5px] border-ink bg-lilac/30 p-4 space-y-3">
+   295→                <div className="flex flex-wrap items-center justify-between gap-2">
+   296→                  <div className="text-sm">
+   297→                    <p className="font-extrabold">{p.order.ticket?.holderName || p.order.user.name || 'بدون اسم'}</p>
+   298→                    <p className="text-xs font-bold text-muted-foreground" dir="ltr">
+   299→                      {p.order.user.phone || p.order.user.email || ''} · {p.order.ticket?.serial || p.order.id.slice(0, 10)}
+   300→                    </p>
+   301→                  </div>
+   302→                  <div className="text-left">
+   303→                    <p className="font-extrabold text-grape">{egp(p.amountMinor)}</p>
+   304→                    <p className="text-xs font-bold text-muted-foreground">{METHOD_LABELS[p.method] || p.method}</p>
+   305→                  </div>
+   306→                </div>
+   307→                <div className="flex items-center justify-between gap-2 flex-wrap">
+   308→                  <span className="text-xs font-bold text-muted-foreground flex items-center gap-1.5">
+   309→                    مرجع العملية:
+   310→                    <span className="font-serial text-ink" dir="ltr">{p.reference}</span>
+   311→                    <button
+   312→                      onClick={() => { navigator.clipboard.writeText(p.reference).then(() => toast.success('المرجع اتنسخ')).catch(() => {}) }}
+   313→                      aria-label="نسخ المرجع"
+   314→                      className="text-grape hover:text-ink"
+   315→                    >
+   316→                      <Copy className="h-3.5 w-3.5" aria-hidden />
+   317→                    </button>
+   318→                  </span>
+   319→                  <div className="flex gap-2">
+   320→                    <Button
+   321→                      size="sm"
+   322→                      disabled={busyId === p.id}
+   323→                      onClick={() => act(p.id, 'complete')}
+   324→                      className="gap-1.5 font-extrabold bg-lime text-ink border-2 border-ink rounded-lg hover:bg-lime/90 min-h-[40px]"
+   325→                    >
+   326→                      {busyId === p.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />}
+   327→                      تأكيد الاستلام
+   328→                    </Button>
+   329→                    <Button
+   330→                      size="sm"
+   331→                      variant="outline"
+   332→                      disabled={busyId === p.id}
+   333→                      onClick={() => act(p.id, 'fail')}
+   334→                      className="gap-1.5 font-extrabold border-2 border-ink rounded-lg bg-white hover:bg-peach/50 min-h-[40px]"
+   335→                    >
+   336→                      <X className="h-3.5 w-3.5" aria-hidden /> رفض
+   337→                    </Button>
+   338→                  </div>
+   339→                </div>
+   340→              </div>
+   341→            ))}
+   342→          </div>
+   343→        )}
+   344→      </div>
+   345→
+   346→      <div className="bg-white nb rounded-2xl p-5">
+   347→        <p className="font-extrabold text-sm mb-4 flex items-center gap-1.5">
+   348→          <ShieldAlert className="h-4 w-4 text-grape" aria-hidden /> إحالات تحت المراجعة ({referrals.length})
+   349→        </p>
+   350→        {referrals.length === 0 ? (
+   351→          <p className="text-sm font-bold text-muted-foreground py-6 text-center">مفيش إحالات مشبوهة حاليًا.</p>
+   352→        ) : (
+   353→          <div className="space-y-3 max-h-80 overflow-y-auto nice-scroll">
+   354→            {referrals.map((r) => (
+   355→              <div key={r.id} className="rounded-xl border-[2.5px] border-ink bg-peach/30 p-4 flex flex-wrap items-center justify-between gap-3">
+   356→                <div className="text-sm">
+   357→                  <p className="font-extrabold">
+   358→                    الداعي: {r.referrer.name || r.referrer.phone} → المدعو: {r.referredUser.name || r.referredUser.phone || r.referredUser.email}
+   359→                  </p>
+   360→                  <p className="text-xs font-bold text-muted-foreground" dir="ltr">{r.fraudFlags}</p>
+   361→                </div>
+   362→                <div className="flex gap-2">
+   363→                  <Button size="sm" disabled={busyId === r.id} onClick={() => reviewReferral(r.id, 'approve')} className="gap-1.5 font-extrabold bg-lime text-ink border-2 border-ink rounded-lg hover:bg-lime/90 min-h-[40px]">
+   364→                    <Check className="h-3.5 w-3.5" aria-hidden /> اعتماد
+   365→                  </Button>
+   366→                  <Button size="sm" variant="outline" disabled={busyId === r.id} onClick={() => reviewReferral(r.id, 'reject')} className="gap-1.5 font-extrabold border-2 border-ink rounded-lg bg-white hover:bg-peach/50 min-h-[40px]">
+   367→                    <X className="h-3.5 w-3.5" aria-hidden /> رفض
+   368→                  </Button>
+   369→                </div>
+   370→              </div>
+   371→            ))}
+   372→          </div>
+   373→        )}
+   374→      </div>
+   375→    </div>
+   376→  )
+   377→}
+   378→
+   379→// ---------- تبويب: الايفنتات ----------
+   380→const EMPTY_EVENT = {
+   381→  id: '', name: '', startsAt: '', venue: '', city: '', capacity: 500, priceEgp: 100,
+   382→  holdMinutes: 15, bookingOpensAt: '', bookingClosesAt: '', ageMin: 16, ageMax: 45,
+   383→  shareText: '', doorsAt: '08:00', endsAt: '17:00', note: '', active: false,
+   384→}
+   385→type EventForm = typeof EMPTY_EVENT
+   386→
+   387→function EventsTab() {
+   388→  const [events, setEvents] = useState<AdminEvent[]>([])
+   389→  const [loading, setLoading] = useState(true)
+   390→  const [dialogOpen, setDialogOpen] = useState(false)
+   391→  const [editing, setEditing] = useState<EventForm>(EMPTY_EVENT)
+   392→  const [busy, setBusy] = useState(false)
+   393→
+   394→  const load = useCallback(async () => {
+   395→    setLoading(true)
+   396→    try {
+   397→      const r = await api<{ events: AdminEvent[] }>('/api/admin/events')
+   398→      setEvents(r.events || [])
+   399→    } catch (e) {
+   400→      toast.error(e instanceof Error ? e.message : 'مشكلة في التحميل')
+   401→    } finally {
+   402→      setLoading(false)
+   403→    }
+   404→  }, [])
+   405→
+   406→  useEffect(() => { load() }, [load])
+   407→
+   408→  const openCreate = () => {
+   409→    const now = new Date()
+   410→    const inDays = (d: number) => new Date(now.getTime() + d * 86400000)
+   411→    setEditing({
+   412→      ...EMPTY_EVENT,
+   413→      startsAt: toLocalInput(inDays(7).toISOString()),
+   414→      bookingOpensAt: toLocalInput(now.toISOString()),
+   415→      bookingClosesAt: toLocalInput(inDays(6).toISOString()),
+   416→    })
+   417→    setDialogOpen(true)
+   418→  }
+   419→
+   420→  const openEdit = (e: AdminEvent) => {
+   421→    setEditing({
+   422→      id: e.id, name: e.name, startsAt: toLocalInput(e.startsAt), venue: e.venue, city: e.city,
+   423→      capacity: e.capacity, priceEgp: e.priceMinor / 100, holdMinutes: e.holdMinutes,
+   424→      bookingOpensAt: toLocalInput(e.bookingOpensAt), bookingClosesAt: toLocalInput(e.bookingClosesAt),
+   425→      ageMin: e.ageMin, ageMax: e.ageMax,
+   426→      shareText: e.settings?.shareText || '', doorsAt: e.settings?.doorsAt || '', endsAt: e.settings?.endsAt || '',
+   427→      note: e.settings?.note || '', active: e.active,
+   428→    })
+   429→    setDialogOpen(true)
+   430→  }
+   431→
+   432→  const save = async () => {
+   433→    setBusy(true)
+   434→    try {
+   435→      const payload = {
+   436→        name: editing.name, startsAt: new Date(editing.startsAt).toISOString(),
+   437→        venue: editing.venue, city: editing.city, capacity: editing.capacity,
+   438→        priceEgp: editing.priceEgp, holdMinutes: editing.holdMinutes,
+   439→        bookingOpensAt: new Date(editing.bookingOpensAt).toISOString(),
+   440→        bookingClosesAt: new Date(editing.bookingClosesAt).toISOString(),
+   441→        ageMin: editing.ageMin, ageMax: editing.ageMax,
+   442→        shareText: editing.shareText, doorsAt: editing.doorsAt, endsAt: editing.endsAt, note: editing.note,
+   443→      }
+   444→      if (editing.id) await api(`/api/admin/events/${editing.id}`, { method: 'PATCH', body: payload })
+   445→      else await api('/api/admin/events', { body: payload })
+   446→      toast.success(editing.id ? 'التعديلات اتحفظت.' : 'الايفنت اتضاف.')
+   447→      setDialogOpen(false)
+   448→      await load()
+   449→    } catch (e) {
+   450→      toast.error(e instanceof Error ? e.message : 'مشكلة في الحفظ')
+   451→    } finally {
+   452→      setBusy(false)
+   453→    }
+   454→  }
+   455→
+   456→  const toggleActive = async (e: AdminEvent) => {
+   457→    try {
+   458→      await api(`/api/admin/events/${e.id}`, { method: 'PATCH', body: { active: !e.active } })
+   459→      toast.success(!e.active ? 'الايفنت بقى هو الظاهر للعامة.' : 'الايفنت اتقفل من الحجز.')
+   460→      await load()
+   461→    } catch (err) {
+   462→      toast.error(err instanceof Error ? err.message : 'مشكلة في التنفيذ')
+   463→    }
+   464→  }
+   465→
+   466→  const remove = async (e: AdminEvent) => {
+   467→    if (!window.confirm(`تحذف "${e.name}" نهائيًا؟`)) return
+   468→    try {
+   469→      await api(`/api/admin/events/${e.id}`, { method: 'DELETE' })
+   470→      toast.success('الايفنت اتحذف.')
+   471→      await load()
+   472→    } catch (err) {
+   473→      toast.error(err instanceof Error ? err.message : 'مشكلة في الحذف')
+   474→    }
+   475→  }
+   476→
+   477→  if (loading) return <CenterSpinner />
+   478→
+   479→  const validForm = editing.name.trim().length >= 3 && editing.venue.trim() && editing.city.trim() && editing.startsAt && editing.bookingOpensAt && editing.bookingClosesAt
+   480→
+   481→  return (
+   482→    <div className="space-y-4">
+   483→      <div className="flex items-center justify-between">
+   484→        <p className="font-extrabold text-sm">الحدث المفعّل هو الوحيد اللي بيظهر للحجز العام</p>
+   485→        <Button onClick={openCreate} className="gap-1.5 font-extrabold bg-lime text-ink border-[3px] border-ink rounded-xl shadow-[3px_3px_0_0_var(--ink)] hover:bg-lime/90 min-h-[44px]">
+   486→          <Plus className="h-4 w-4" aria-hidden /> ايفنت جديد
+   487→        </Button>
+   488→      </div>
+   489→
+   490→      {events.length === 0 ? (
+   491→        <p className="text-sm font-bold text-muted-foreground bg-white nb rounded-2xl py-10 text-center">مفيش ايفنتات — ضيف الأول.</p>
+   492→      ) : (
+   493→        events.map((e) => (
+   494→          <div key={e.id} className={`bg-white nb rounded-2xl p-5 ${e.active ? 'border-r-[6px] border-r-lime' : ''}`}>
+   495→            <div className="flex flex-wrap items-start justify-between gap-3">
+   496→              <div>
+   497→                <div className="flex items-center gap-2 flex-wrap">
+   498→                  <h3 className="font-extrabold text-lg">{e.name}</h3>
+   499→                  {e.active ? (
+   500→                    <span className="bg-lime border-2 border-ink rounded-lg px-2.5 py-1 text-[11px] font-extrabold">مفعّل — ظاهر للعامة</span>
+   501→                  ) : (
+   502→                    <span className="bg-muted border-2 border-ink/40 rounded-lg px-2.5 py-1 text-[11px] font-bold text-muted-foreground">متوقف</span>
+   503→                  )}
+   504→                </div>
+   505→                <p className="text-xs font-bold text-muted-foreground mt-1.5">
+   506→                  {new Date(e.startsAt).toLocaleString('ar-EG', { dateStyle: 'full', timeStyle: 'short' })} — {e.venue}، {e.city}
+   507→                </p>
+   508→                <p className="text-xs font-bold text-muted-foreground mt-1">
+   509→                  السعر: <span className="font-extrabold text-ink">{e.priceMinor === 0 ? 'مجاني' : egp(e.priceMinor)}</span>
+   510→                  {' · '}اتحجز: <span className="font-extrabold text-ink">{e.soldCount}</span> من {e.capacity}
+   511→                  {' · '}سن من {e.ageMin} لـ {e.ageMax}
+   512→                </p>
+   513→              </div>
+   514→              <div className="flex flex-wrap gap-2">
+   515→                <Button size="sm" variant="outline" onClick={() => toggleActive(e)} className="gap-1.5 font-extrabold border-2 border-ink rounded-lg bg-white hover:bg-lilac/50 min-h-[40px]">
+   516→                  <Power className="h-3.5 w-3.5" aria-hidden /> {e.active ? 'إيقاف' : 'تفعيل'}
+   517→                </Button>
+   518→                <Button size="sm" variant="outline" onClick={() => openEdit(e)} className="gap-1.5 font-extrabold border-2 border-ink rounded-lg bg-white hover:bg-lilac/50 min-h-[40px]">
+   519→                  <Pencil className="h-3.5 w-3.5" aria-hidden /> تعديل
+   520→                </Button>
+   521→                <Button size="sm" variant="outline" disabled={e.active} onClick={() => remove(e)} className="gap-1.5 font-extrabold border-2 border-ink rounded-lg bg-white hover:bg-peach/50 disabled:opacity-40 min-h-[40px]">
+   522→                  <Trash2 className="h-3.5 w-3.5" aria-hidden /> حذف
+   523→                </Button>
+   524→              </div>
+   525→            </div>
+   526→          </div>
+   527→        ))
+   528→      )}
+   529→
+   530→      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+   531→        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto nice-scroll bg-white border-[3px] border-ink rounded-3xl">
+   532→          <DialogHeader>
+   533→            <DialogTitle className="text-xl font-extrabold">{editing.id ? 'تعديل الايفنت' : 'ايفنت جديد'}</DialogTitle>
+   534→          </DialogHeader>
+   535→          <div className="grid sm:grid-cols-2 gap-4">
+   536→            <Field label="اسم الايفنت"><Input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} className="field" placeholder="Stand Out Summit 2026" /></Field>
+   537→            <Field label="الموعد"><Input type="datetime-local" value={editing.startsAt} onChange={(e) => setEditing({ ...editing, startsAt: e.target.value })} className="field" /></Field>
+   538→            <Field label="المكان"><Input value={editing.venue} onChange={(e) => setEditing({ ...editing, venue: e.target.value })} className="field" placeholder="The GrEEK Campus" /></Field>
+   539→            <Field label="المدينة"><Input value={editing.city} onChange={(e) => setEditing({ ...editing, city: e.target.value })} className="field" placeholder="وسط البلد، القاهرة" /></Field>
+   540→            <Field label="عدد المقاعد"><Input inputMode="numeric" dir="ltr" value={String(editing.capacity)} onChange={(e) => setEditing({ ...editing, capacity: Number(e.target.value.replace(/[^\d]/g, '')) || 0 })} className="field" /></Field>
+   541→            <Field label="سعر التذكرة (جنيه — 0 يعني مجاني)"><Input inputMode="numeric" dir="ltr" value={String(editing.priceEgp)} onChange={(e) => setEditing({ ...editing, priceEgp: Number(e.target.value.replace(/[^\d]/g, '')) || 0 })} className="field" /></Field>
+   542→            <Field label="مدة الاحتفاظ بالمقعد (دقائق)"><Input inputMode="numeric" dir="ltr" value={String(editing.holdMinutes)} onChange={(e) => setEditing({ ...editing, holdMinutes: Number(e.target.value.replace(/[^\d]/g, '')) || 0 })} className="field" /></Field>
+   543→            <Field label="أقل سن"><Input inputMode="numeric" dir="ltr" value={String(editing.ageMin)} onChange={(e) => setEditing({ ...editing, ageMin: Number(e.target.value.replace(/[^\d]/g, '')) || 0 })} className="field" /></Field>
+   544→            <Field label="أقصى سن"><Input inputMode="numeric" dir="ltr" value={String(editing.ageMax)} onChange={(e) => setEditing({ ...editing, ageMax: Number(e.target.value.replace(/[^\d]/g, '')) || 0 })} className="field" /></Field>
+   545→            <Field label="فتح الحجز"><Input type="datetime-local" value={editing.bookingOpensAt} onChange={(e) => setEditing({ ...editing, bookingOpensAt: e.target.value })} className="field" /></Field>
+   546→            <Field label="قفل الحجز"><Input type="datetime-local" value={editing.bookingClosesAt} onChange={(e) => setEditing({ ...editing, bookingClosesAt: e.target.value })} className="field" /></Field>
+   547→            <Field label="نص رسالة المشاركة (اختياري — استخدم {link})"><Textarea value={editing.shareText} onChange={(e) => setEditing({ ...editing, shareText: e.target.value })} className="field min-h-[72px]" placeholder="I'm going to Stand Out Summit 2026... Come with me: {link}" /></Field>
+   548→            <Field label="ملاحظة على الايفنت"><Textarea value={editing.note} onChange={(e) => setEditing({ ...editing, note: e.target.value })} className="field min-h-[72px]" /></Field>
+   549→          </div>
+   550→          <div className="flex gap-3 pt-2">
+   551→            <Button onClick={save} disabled={busy || !validForm} className="flex-1 min-h-[50px] font-extrabold rounded-xl border-[3px] border-ink bg-lime text-ink shadow-[4px_4px_0_0_var(--ink)] hover:bg-lime/90 disabled:opacity-50">
+   552→              {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : 'حفظ'}
+   553→            </Button>
+   554→            <Button variant="outline" onClick={() => setDialogOpen(false)} className="min-h-[50px] font-extrabold border-[3px] border-ink rounded-xl bg-white">إلغاء</Button>
+   555→          </div>
+   556→        </DialogContent>
+   557→      </Dialog>
+   558→    </div>
+   559→  )
+   560→}
+   561→
+   562→// ---------- تبويب: حسابات استلام الفلوس ----------
+   563→function AccountsTab() {
+   564→  const [accounts, setAccounts] = useState<Account[]>([])
+   565→  const [loading, setLoading] = useState(true)
+   566→  const [busyId, setBusyId] = useState<string | null>(null)
+   567→  const [form, setForm] = useState({ method: 'instapay', label: 'InstaPay', accountName: '', accountNumber: '', instructions: '' })
+   568→  const [adding, setAdding] = useState(false)
+   569→
+   570→  const load = useCallback(async () => {
+   571→    setLoading(true)
+   572→    try {
+   573→      const r = await api<{ accounts: Account[] }>('/api/admin/payment-accounts')
+   574→      setAccounts(r.accounts || [])
+   575→    } catch (e) {
+   576→      toast.error(e instanceof Error ? e.message : 'مشكلة في التحميل')
+   577→    } finally {
+   578→      setLoading(false)
+   579→    }
+   580→  }, [])
+   581→
+   582→  useEffect(() => { load() }, [load])
+   583→
+   584→  const add = async () => {
+   585→    setAdding(true)
+   586→    try {
+   587→      await api('/api/admin/payment-accounts', { body: { ...form, sortOrder: 10 } })
+   588→      toast.success('الحساب اتضاف — بقا ظاهر في بوابة الدفع.')
+   589→      setForm({ method: 'instapay', label: 'InstaPay', accountName: '', accountNumber: '', instructions: '' })
+   590→      await load()
+   591→    } catch (e) {
+   592→      toast.error(e instanceof Error ? e.message : 'مشكلة في الإضافة')
+   593→    } finally {
+   594→      setAdding(false)
+   595→    }
+   596→  }
+   597→
+   598→  const patch = async (id: string, data: Record<string, unknown>) => {
+   599→    setBusyId(id)
+   600→    try {
+   601→      await api(`/api/admin/payment-accounts/${id}`, { method: 'PATCH', body: data })
+   602→      await load()
+   603→    } catch (e) {
+   604→      toast.error(e instanceof Error ? e.message : 'مشكلة في الحفظ')
+   605→    } finally {
+   606→      setBusyId(null)
+   607→    }
+   608→  }
+   609→
+   610→  const remove = async (id: string) => {
+   611→    if (!window.confirm('تحذف حساب الاستلام ده؟')) return
+   612→    setBusyId(id)
+   613→    try {
+   614→      await api(`/api/admin/payment-accounts/${id}`, { method: 'DELETE' })
+   615→      toast.success('الحساب اتحذف.')
+   616→      await load()
+   617→    } catch (e) {
+   618→      toast.error(e instanceof Error ? e.message : 'مشكلة في الحذف')
+   619→    } finally {
+   620→      setBusyId(null)
+   621→    }
+   622→  }
+   623→
+   624→  if (loading) return <CenterSpinner />
+   625→
+   626→  const validAdd = form.label.trim().length >= 2 && form.accountName.trim().length >= 2 && form.accountNumber.trim().length >= 4
+   627→
+   628→  return (
+   629→    <div className="space-y-5">
+   630→      <div className="bg-white nb rounded-2xl p-5">
+   631→        <p className="font-extrabold text-sm mb-1 flex items-center gap-1.5">
+   632→          <Landmark className="h-4 w-4 text-grape" aria-hidden /> ضيف حساب يستقبل عليه الناس
+   633→        </p>
+   634→        <p className="text-xs font-bold text-muted-foreground mb-4">
+   635→          الايميل، رقم الموبايل، InstaPay، والمحافظ — اللي هتظهر للعملاء في بوابة الدفع.
+   636→        </p>
+   637→        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+   638→          <Field label="الطريقة">
+   639→            <Select value={form.method} onValueChange={(v) => setForm({ ...form, method: v, label: METHOD_LABELS[v] || v })}>
+   640→              <SelectTrigger className="field" aria-label="طريقة الاستلام"><SelectValue /></SelectTrigger>
+   641→              <SelectContent className="border-[2.5px] border-ink rounded-xl">
+   642→                {Object.entries(METHOD_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+   643→              </SelectContent>
+   644→            </Select>
+   645→          </Field>
+   646→          <Field label="الاسم الظاهر"><Input value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} className="field" /></Field>
+   647→          <Field label="اسم صاحب الحساب"><Input value={form.accountName} onChange={(e) => setForm({ ...form, accountName: e.target.value })} className="field" placeholder="Stand Out" /></Field>
+   648→          <Field label={form.method === 'instapay' ? 'عنوان InstaPay' : 'رقم الحساب/المحفظة'}>
+   649→            <Input value={form.accountNumber} onChange={(e) => setForm({ ...form, accountNumber: e.target.value })} className="field" dir="ltr" placeholder={form.method === 'instapay' ? 'standout@instapay' : '01xxxxxxxxx'} />
+   650→          </Field>
+   651→        </div>
+   652→        <Button onClick={add} disabled={adding || !validAdd} className="mt-4 gap-1.5 font-extrabold bg-lime text-ink border-[3px] border-ink rounded-xl shadow-[3px_3px_0_0_var(--ink)] hover:bg-lime/90 min-h-[46px] disabled:opacity-50">
+   653→          {adding ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Plus className="h-4 w-4" aria-hidden />} إضافة الحساب
+   654→        </Button>
+   655→      </div>
+   656→
+   657→      <div className="space-y-3">
+   658→        {accounts.map((a) => (
+   659→          <div key={a.id} className="bg-white nb rounded-2xl p-4">
+   660→            <div className="flex flex-wrap items-center justify-between gap-3">
+   661→              <div className="flex items-center gap-3 min-w-0">
+   662→                <span className="h-10 w-10 rounded-xl border-[2.5px] border-ink bg-lilac flex items-center justify-center shrink-0 font-extrabold text-xs">
+   663→                  {METHOD_LABELS[a.method]?.slice(0, 2) || a.method.slice(0, 2)}
+   664→                </span>
+   665→                <div className="min-w-0">
+   666→                  <p className="font-extrabold text-sm">{a.label} {a.active ? '' : '(موقوف)'}</p>
+   667→                  <p className="text-xs font-bold text-muted-foreground truncate" dir="ltr">{a.accountNumber} — {a.accountName}</p>
+   668→                </div>
+   669→              </div>
+   670→              <div className="flex items-center gap-3">
+   671→                <label className="flex items-center gap-2 text-xs font-extrabold">
+   672→                  شغّال
+   673→                  <Switch checked={a.active} disabled={busyId === a.id} onCheckedChange={(v) => patch(a.id, { active: v })} aria-label={`تشغيل ${a.label}`} />
+   674→                </label>
+   675→                <Button size="sm" variant="outline" onClick={() => remove(a.id)} disabled={busyId === a.id} className="gap-1.5 font-extrabold border-2 border-ink rounded-lg bg-white hover:bg-peach/50 min-h-[40px]">
+   676→                  <Trash2 className="h-3.5 w-3.5" aria-hidden /> حذف
+   677→                </Button>
+   678→              </div>
+   679→            </div>
+   680→          </div>
+   681→        ))}
+   682→        {accounts.length === 0 && (
+   683→          <p className="text-sm font-bold text-muted-foreground bg-white nb rounded-2xl py-10 text-center">
+   684→            مفيش حسابات استلام — ضيف حسابك الأول عشان الدفع يشتغل.
+   685→          </p>
+   686→        )}
+   687→      </div>
+   688→    </div>
+   689→  )
+   690→}
+   691→
+   692→// ---------- تبويب: المستخدمين ----------
+   693→function UsersTab() {
+   694→  const [users, setUsers] = useState<UserRow[]>([])
+   695→  const [q, setQ] = useState('')
+   696→  const [loading, setLoading] = useState(true)
+   697→  const [busyId, setBusyId] = useState<string | null>(null)
+   698→
+   699→  const load = useCallback(async (query = '') => {
+   700→    setLoading(true)
+   701→    try {
+   702→      const r = await api<{ users: UserRow[] }>(`/api/admin/users?q=${encodeURIComponent(query)}`)
+   703→      setUsers(r.users || [])
+   704→    } catch (e) {
+   705→      toast.error(e instanceof Error ? e.message : 'مشكلة في التحميل')
+   706→    } finally {
+   707→      setLoading(false)
+   708→    }
+   709→  }, [])
+   710→
+   711→  useEffect(() => { load() }, [load])
+   712→
+   713→  const patch = async (id: string, data: Record<string, unknown>, okMsg: string) => {
+   714→    setBusyId(id)
+   715→    try {
+   716→      await api(`/api/admin/users/${id}`, { method: 'PATCH', body: data })
+   717→      toast.success(okMsg)
+   718→      await load(q)
+   719→    } catch (e) {
+   720→      toast.error(e instanceof Error ? e.message : 'مشكلة في التنفيذ')
+   721→    } finally {
+   722→      setBusyId(null)
+   723→    }
+   724→  }
+   725→
+   726→  return (
+   727→    <div className="bg-white nb rounded-2xl p-5">
+   728→      <div className="flex gap-2 mb-4">
+   729→        <div className="relative flex-1">
+   730→          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" aria-hidden />
+   731→          <Input
+   732→            value={q}
+   733→            onChange={(e) => setQ(e.target.value)}
+   734→            onKeyDown={(e) => e.key === 'Enter' && load(q)}
+   735→            placeholder="ابحث بالاسم أو الرقم أو الإيميل..."
+   736→            className="pl-10 font-bold bg-white border-[2.5px] border-ink rounded-xl h-11"
+   737→            aria-label="بحث في المستخدمين"
+   738→          />
+   739→        </div>
+   740→        <Button onClick={() => load(q)} className="font-extrabold bg-ink text-cream border-[2.5px] border-ink rounded-xl min-h-[44px] px-4">بحث</Button>
+   741→      </div>
+   742→
+   743→      {loading ? <CenterSpinner /> : (
+   744→        <div className="space-y-2 max-h-[560px] overflow-y-auto nice-scroll">
+   745→          {users.length === 0 ? (
+   746→            <p className="text-sm font-bold text-muted-foreground py-8 text-center">مفيش نتائج.</p>
+   747→          ) : users.map((u) => (
+   748→            <div key={u.id} className="rounded-xl border-2 border-ink/40 bg-lilac/20 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+   749→              <div className="min-w-0">
+   750→                <p className="text-sm font-extrabold truncate">
+   751→                  {u.name || '(بدون اسم)'}
+   752→                  {u.role !== 'attendee' && <span className="mr-2 bg-grape text-cream rounded-md px-2 py-0.5 text-[10px] font-extrabold" dir="ltr">{u.role}</span>}
+   753→                  {u.status === 'blocked' && <span className="mr-2 bg-peach border border-ink rounded-md px-2 py-0.5 text-[10px] font-extrabold">موقوف</span>}
+   754→                </p>
+   755→                <p className="text-xs font-bold text-muted-foreground truncate" dir="ltr">
+   756→                  {u.phone || u.email || ''} · تذاكر: {u.ticketsCount} · إحالات: {u.referrals} · نقاط: {u.points}
+   757→                </p>
+   758→              </div>
+   759→              <div className="flex items-center gap-2 shrink-0">
+   760→                <button
+   761→                  onClick={() => {
+   762→                    const v = window.prompt('زوّد أو اخصم نقاط — اكتب رقم (مثال 5 أو -3):')
+   763→                    if (!v) return
+   764→                    const d = Number(v)
+   765→                    if (Number.isNaN(d) || d === 0) return toast.error('اكتب رقم صحيح غير الصفر.')
+   766→                    patch(u.id, { pointsDelta: d }, 'النقاط اتعدلت.')
+   767→                  }}
+   768→                  disabled={busyId === u.id}
+   769→                  className="rounded-lg border-2 border-ink bg-white hover:bg-lilac/60 px-2.5 py-1.5 text-xs font-extrabold min-h-[36px] inline-flex items-center gap-1"
+   770→                  aria-label="تعديل النقاط"
+   771→                >
+   772→                  <Coins className="h-3.5 w-3.5 text-grape" aria-hidden /> نقاط
+   773→                </button>
+   774→                <Button
+   775→                  size="sm"
+   776→                  variant="outline"
+   777→                  disabled={busyId === u.id}
+   778→                  onClick={() => patch(u.id, { status: u.status === 'active' ? 'blocked' : 'active' }, u.status === 'active' ? 'الحساب اتوقف.' : 'الحساب رجع شغّال.')}
+   779→                  className="gap-1.5 font-extrabold border-2 border-ink rounded-lg bg-white hover:bg-peach/50 min-h-[36px] px-2.5 text-xs"
+   780→                >
+   781→                  <Ban className="h-3.5 w-3.5" aria-hidden /> {u.status === 'active' ? 'إيقاف' : 'تشغيل'}
+   782→                </Button>
+   783→              </div>
+   784→            </div>
+   785→          ))}
+   786→        </div>
+   787→      )}
+   788→    </div>
+   789→  )
+   790→}
+   791→
+   792→// ---------- تبويب: المسؤولين (للمسؤول الأعلى) ----------
+   793→function AdminsTab() {
+   794→  const [admins, setAdmins] = useState<AdminRow[]>([])
+   795→  const [loading, setLoading] = useState(true)
+   796→  const [busyId, setBusyId] = useState<string | null>(null)
+   797→  const [form, setForm] = useState({ name: '', phone: '', email: '', role: 'admin' })
+   798→  const [adding, setAdding] = useState(false)
+   799→
+   800→  const load = useCallback(async () => {
+   801→    setLoading(true)
+   802→    try {
+   803→      const r = await api<{ admins: AdminRow[] }>('/api/admin/admins')
+   804→      setAdmins(r.admins || [])
+   805→    } catch (e) {
+   806→      toast.error(e instanceof Error ? e.message : 'مشكلة في التحميل')
+   807→    } finally {
+   808→      setLoading(false)
+   809→    }
+   810→  }, [])
+   811→
+   812→  useEffect(() => { load() }, [load])
+   813→
+   814→  const add = async () => {
+   815→    setAdding(true)
+   816→    try {
+   817→      await api('/api/admin/admins', { body: form })
+   818→      toast.success('المسؤول اتضاف — بيدخل بنفس بوابة التحقق برقمه أو إيميله.')
+   819→      setForm({ name: '', phone: '', email: '', role: 'admin' })
+   820→      await load()
+   821→    } catch (e) {
+   822→      toast.error(e instanceof Error ? e.message : 'مشكلة في الإضافة')
+   823→    } finally {
+   824→      setAdding(false)
+   825→    }
+   826→  }
+   827→
+   828→  const changeRole = async (id: string, role: string) => {
+   829→    setBusyId(id)
+   830→    try {
+   831→      await api(`/api/admin/admins/${id}`, { method: 'PATCH', body: { role } })
+   832→      toast.success('الصلاحية اتغيرت.')
+   833→      await load()
+   834→    } catch (e) {
+   835→      toast.error(e instanceof Error ? e.message : 'مشكلة في التنفيذ')
+   836→    } finally {
+   837→      setBusyId(null)
+   838→    }
+   839→  }
+   840→
+   841→  const remove = async (id: string) => {
+   842→    if (!window.confirm('هتشيل صلاحيات المسؤول ده؟')) return
+   843→    setBusyId(id)
+   844→    try {
+   845→      const r = await api<{ demoted?: boolean }>(`/api/admin/admins/${id}`, { method: 'DELETE' })
+   846→      toast.success(r.demoted ? 'اتخفض لعضو عادي (عنده تذاكر).' : 'المسؤول اتشال.')
+   847→      await load()
+   848→    } catch (e) {
+   849→      toast.error(e instanceof Error ? e.message : 'مشكلة في التنفيذ')
+   850→    } finally {
+   851→      setBusyId(null)
+   852→    }
+   853→  }
+   854→
+   855→  if (loading) return <CenterSpinner />
+   856→
+   857→  const validAdd = form.name.trim().length >= 2 && (form.phone.trim().length === 11 || form.email.trim().includes('@'))
+   858→
+   859→  return (
+   860→    <div className="space-y-5">
+   861→      <div className="bg-white nb rounded-2xl p-5">
+   862→        <p className="font-extrabold text-sm mb-1 flex items-center gap-1.5">
+   863→          <ShieldUser className="h-4 w-4 text-grape" aria-hidden /> ضيف مسؤول معاك في إدارة النظام
+   864→        </p>
+   865→        <p className="text-xs font-bold text-muted-foreground mb-4">
+   866→          المسؤول بيدخل بنفس حسابه — أول ما يسجل بالرقم/الإيميل ده هيلقى لوحة التحكم.
+   867→        </p>
+   868→        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+   869→          <Field label="الاسم"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="field" /></Field>
+   870→          <Field label="رقم الموبايل (أو إيميل)"><Input inputMode="tel" dir="ltr" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value.replace(/[^\d]/g, '').slice(0, 11) })} className="field" placeholder="01xxxxxxxxx" /></Field>
+   871→          <Field label="أو الإيميل"><Input type="email" dir="ltr" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="field" placeholder="admin@example.com" /></Field>
+   872→          <Field label="الصلاحية">
+   873→            <Select value={form.role} onValueChange={(v) => setForm({ ...form, role: v })}>
+   874→              <SelectTrigger className="field" aria-label="الصلاحية"><SelectValue /></SelectTrigger>
+   875→              <SelectContent className="border-[2.5px] border-ink rounded-xl">
+   876→                <SelectItem value="admin">أدمن — كل اللوحة</SelectItem>
+   877→                <SelectItem value="staff">موظف — دعم بس</SelectItem>
+   878→              </SelectContent>
+   879→            </Select>
+   880→          </Field>
+   881→        </div>
+   882→        <Button onClick={add} disabled={adding || !validAdd} className="mt-4 gap-1.5 font-extrabold bg-lime text-ink border-[3px] border-ink rounded-xl shadow-[3px_3px_0_0_var(--ink)] hover:bg-lime/90 min-h-[46px] disabled:opacity-50">
+   883→          {adding ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Plus className="h-4 w-4" aria-hidden />} إضافة مسؤول
+   884→        </Button>
+   885→      </div>
+   886→
+   887→      <div className="space-y-2">
+   888→        {admins.map((a) => (
+   889→          <div key={a.id} className="bg-white nb rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
+   890→            <div className="min-w-0">
+   891→              <p className="text-sm font-extrabold">
+   892→                {a.name || '(بدون اسم)'}
+   893→                <span className={`mr-2 rounded-md px-2 py-0.5 text-[10px] font-extrabold ${a.role === 'super_admin' ? 'bg-grape text-cream' : 'bg-lilac border border-ink'}`} dir="ltr">{a.role}</span>
+   894→                {a.status === 'blocked' && <span className="mr-2 bg-peach border border-ink rounded-md px-2 py-0.5 text-[10px] font-extrabold">موقوف</span>}
+   895→              </p>
+   896→              <p className="text-xs font-bold text-muted-foreground" dir="ltr">
+   897→                {a.phone || a.email || ''} · جلسات شغّالة: {a.activeSessions}
+   898→              </p>
+   899→            </div>
+   900→            {a.role !== 'super_admin' && (
+   901→              <div className="flex items-center gap-2">
+   902→                <Select value={a.role} onValueChange={(v) => changeRole(a.id, v)} disabled={busyId === a.id}>
+   903→                  <SelectTrigger className="h-9 w-[130px] bg-white border-2 border-ink rounded-lg text-xs font-extrabold" aria-label="تغيير الصلاحية"><SelectValue /></SelectTrigger>
+   904→                  <SelectContent className="border-[2.5px] border-ink rounded-xl">
+   905→                    <SelectItem value="admin">أدمن</SelectItem>
+   906→                    <SelectItem value="staff">موظف</SelectItem>
+   907→                    <SelectItem value="attendee">عضو عادي</SelectItem>
+   908→                  </SelectContent>
+   909→                </Select>
+   910→                <Button size="sm" variant="outline" onClick={() => remove(a.id)} disabled={busyId === a.id} className="gap-1.5 font-extrabold border-2 border-ink rounded-lg bg-white hover:bg-peach/50 min-h-[36px] text-xs">
+   911→                  <Trash2 className="h-3.5 w-3.5" aria-hidden /> إزالة
+   912→                </Button>
+   913→              </div>
+   914→            )}
+   915→          </div>
+   916→        ))}
+   917→      </div>
+   918→    </div>
+   919→  )
+   920→}
+   921→
+   922→// ---------- تبويب: طلبات الاستبدال ----------
+   923→function RedemptionsTab() {
+   924→  const [rows, setRows] = useState<RedemptionRow[]>([])
+   925→  const [loading, setLoading] = useState(true)
+   926→  const [busyId, setBusyId] = useState<string | null>(null)
+   927→
+   928→  const load = useCallback(async () => {
+   929→    setLoading(true)
+   930→    try {
+   931→      const r = await api<{ redemptions: RedemptionRow[] }>('/api/admin/redemptions')
+   932→      setRows(r.redemptions || [])
+   933→    } catch (e) {
+   934→      toast.error(e instanceof Error ? e.message : 'مشكلة في التحميل')
+   935→    } finally {
+   936→      setLoading(false)
+   937→    }
+   938→  }, [])
+   939→
+   940→  useEffect(() => { load() }, [load])
+   941→
+   942→  const act = async (id: string, action: 'fulfill' | 'cancel') => {
+   943→    setBusyId(id)
+   944→    try {
+   945→      await api(`/api/admin/redemptions/${id}`, { method: 'PATCH', body: { action } })
+   946→      toast.success(action === 'fulfill' ? 'الجايزة اتححذت كمسلّمة.' : 'الطلب اتلغي والنقاط رجعت لصاحبها.')
+   947→      await load()
+   948→    } catch (e) {
+   949→      toast.error(e instanceof Error ? e.message : 'مشكلة في التنفيذ')
+   950→    } finally {
+   951→      setBusyId(null)
+   952→    }
+   953→  }
+   954→
+   955→  if (loading) return <CenterSpinner />
+   956→
+   957→  const statusLabel = (s: string) => s === 'PENDING' ? 'في الانتظار' : s === 'FULFILLED' ? 'اتسلمت' : 'ملغاة'
+   958→
+   959→  return (
+   960→    <div className="bg-white nb rounded-2xl p-5">
+   961→      <p className="font-extrabold text-sm mb-4 flex items-center gap-1.5">
+   962→        <Gift className="h-4 w-4 text-grape" aria-hidden /> طلبات استبدال الجوائز ({rows.length})
+   963→      </p>
+   964→      {rows.length === 0 ? (
+   965→        <p className="text-sm font-bold text-muted-foreground py-8 text-center">مفيش طلبات لسه.</p>
+   966→      ) : (
+   967→        <div className="space-y-2 max-h-[520px] overflow-y-auto nice-scroll">
+   968→          {rows.map((r) => (
+   969→            <div key={r.id} className="rounded-xl border-2 border-ink/40 bg-lilac/20 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+   970→              <div className="min-w-0">
+   971→                <p className="text-sm font-extrabold truncate">{r.reward.name} — {r.user.name || r.user.phone || r.user.email}</p>
+   972→                <p className="text-xs font-bold text-muted-foreground">
+   973→                  {r.pointsSpent} نقطة · {statusLabel(r.status)} · {new Date(r.createdAt).toLocaleDateString('ar-EG')}
+   974→                </p>
+   975→              </div>
+   976→              {r.status === 'PENDING' ? (
+   977→                <div className="flex gap-2">
+   978→                  <Button size="sm" disabled={busyId === r.id} onClick={() => act(r.id, 'fulfill')} className="gap-1.5 font-extrabold bg-lime text-ink border-2 border-ink rounded-lg hover:bg-lime/90 min-h-[40px]">
+   979→                    <Check className="h-3.5 w-3.5" aria-hidden /> اتسلمت
+   980→                  </Button>
+   981→                  <Button size="sm" variant="outline" disabled={busyId === r.id} onClick={() => act(r.id, 'cancel')} className="gap-1.5 font-extrabold border-2 border-ink rounded-lg bg-white hover:bg-peach/50 min-h-[40px]">
+   982→                    <X className="h-3.5 w-3.5" aria-hidden /> إلغاء + رد النقاط
+   983→                  </Button>
+   984→                </div>
+   985→              ) : (
+   986→                <span className="text-xs font-extrabold text-muted-foreground">{statusLabel(r.status)}</span>
+   987→              )}
+   988→            </div>
+   989→          ))}
+   990→        </div>
+   991→      )}
+   992→    </div>
+   993→  )
+   994→}
+   995→
+   996→// ---------- تبويب: الإعدادات ----------
+   997→function SettingsTab({ isSuper }: { isSuper?: boolean }) {
+   998→  const [s, setS] = useState<SettingsData | null>(null)
+   999→  const [loading, setLoading] = useState(true)
+  1000→  const [saving, setSaving] = useState(false)
+  1001→  const [testTarget, setTestTarget] = useState('')
+  1002→  const [testing, setTesting] = useState<'sms' | 'email' | null>(null)
+  1003→  const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' })
+  1004→  const [pwBusy, setPwBusy] = useState(false)
+  1005→
+  1006→  const load = useCallback(async () => {
+  1007→    setLoading(true)
+  1008→    try {
+  1009→      const r = await api<{ settings: SettingsData }>('/api/admin/settings')
+  1010→      setS(r.settings)
+  1011→    } catch (e) {
+  1012→      toast.error(e instanceof Error ? e.message : 'مشكلة في التحميل')
+  1013→    } finally {
+  1014→      setLoading(false)
+  1015→    }
+  1016→  }, [])
+  1017→
+  1018→  useEffect(() => { load() }, [load])
+  1019→
+  1020→  const save = async () => {
+  1021→    if (!s) return
+  1022→    setSaving(true)
+  1023→    try {
+  1024→      const r = await api<{ settings: SettingsData }>('/api/admin/settings', {
+  1025→        method: 'PUT',
+  1026→        body: {
+  1027→          siteName: s.siteName, tagline: s.tagline, supportEmail: s.supportEmail, supportPhone: s.supportPhone,
+  1028→          smsProvider: s.smsProvider, smsMisrUsername: s.smsMisrUsername, smsMisrPassword: s.smsMisrPassword,
+  1029→          smsMisrToken: s.smsMisrToken, smsMisrSender: s.smsMisrSender, smsMisrEnvironment: s.smsMisrEnvironment,
+  1030→          smsGatewayUrl: s.smsGatewayUrl, smsGatewayKey: s.smsGatewayKey, smsSenderName: s.smsSenderName,
+  1031→          emailProvider: s.emailProvider, resendApiKey: s.resendApiKey, emailFromName: s.emailFromName,
+  1032→          emailFromAddress: s.emailFromAddress, emailGatewayUrl: s.emailGatewayUrl, emailGatewayKey: s.emailGatewayKey,
+  1033→          hideDevOtp: s.hideDevOtp,
+  1034→        },
+  1035→      })
+  1036→      setS(r.settings)
+  1037→      toast.success('الإعدادات اتحفظت.')
+  1038→    } catch (e) {
+  1039→      toast.error(e instanceof Error ? e.message : 'مشكلة في الحفظ')
+  1040→    } finally {
+  1041→      setSaving(false)
+  1042→    }
+  1043→  }
+  1044→
+  1045→  const changePassword = async () => {
+  1046→    setPwBusy(true)
+  1047→    try {
+  1048→      await api('/api/admin/password', { body: { currentPassword: pwForm.current, newPassword: pwForm.next } })
+  1049→      setPwForm({ current: '', next: '', confirm: '' })
+  1050→      toast.success('كلمة سر الأدمن اتغيرت — استخدمها في الدخول الجاي.')
+  1051→    } catch (e) {
+  1052→      toast.error(e instanceof Error ? e.message : 'مشكلة في التغيير')
+  1053→    } finally {
+  1054→      setPwBusy(false)
+  1055→    }
+  1056→  }
+  1057→
+  1058→  const testSend = async (channel: 'sms' | 'email') => {
+  1059→    setTesting(channel)
+  1060→    try {
+  1061→      await api('/api/admin/settings', { body: { channel, target: testTarget } })
+  1062→      toast.success('رسالة التجربة بعتت — شوف وصلت ولا لأ.')
+  1063→    } catch (e) {
+  1064→      toast.error(e instanceof Error ? e.message : 'فشل الإرسال')
+  1065→    } finally {
+  1066→      setTesting(null)
+  1067→    }
+  1068→  }
+  1069→
+  1070→  if (loading || !s) return <CenterSpinner />
+  1071→
+  1072→  const upd = (k: string, v: string) => setS({ ...s, [k]: v })
+  1073→
+  1074→  return (
+  1075→    <div className="space-y-5">
+  1076→      <Reveal>
+  1077→        <div className="bg-white nb rounded-2xl p-5 space-y-4">
+  1078→          <p className="font-extrabold text-sm">هوية الموقع وبيانات التواصل</p>
+  1079→          <div className="grid sm:grid-cols-2 gap-4">
+  1080→            <Field label="اسم الموقع"><Input value={s.siteName || ''} onChange={(e) => upd('siteName', e.target.value)} className="field" /></Field>
+  1081→            <Field label="الشعار التسويقي"><Input value={s.tagline || ''} onChange={(e) => upd('tagline', e.target.value)} className="field" /></Field>
+  1082→            <Field label="إيميل الدعم (بيظهر للعملاء)"><Input type="email" dir="ltr" value={s.supportEmail || ''} onChange={(e) => upd('supportEmail', e.target.value)} className="field" /></Field>
+  1083→            <Field label="رقم الدعم (بيظهر للعملاء)"><Input dir="ltr" value={s.supportPhone || ''} onChange={(e) => upd('supportPhone', e.target.value)} className="field" placeholder="01xxxxxxxxx" /></Field>
+  1084→          </div>
+  1085→        </div>
+  1086→      </Reveal>
+  1087→
+  1088→      <Reveal delay={0.05}>
+  1089→        <div className="bg-white nb rounded-2xl p-5 space-y-4">
+  1090→          <div className="flex items-center justify-between">
+  1091→            <p className="font-extrabold text-sm flex items-center gap-1.5">
+  1092→              <Send className="h-4 w-4 text-grape" aria-hidden /> مزود الرسائل SMS — أكواد الدخول برقم الموبايل
+  1093→            </p>
+  1094→            <span className={`rounded-lg border-2 border-ink px-2.5 py-1 text-[11px] font-extrabold ${s.smsConfigured ? 'bg-lime' : 'bg-peach'}`}>
+  1095→              {s.smsConfigured ? 'مربوطة' : 'غير مربوطة — أكواد بتظهر في وضع التطوير'}
+  1096→            </span>
+  1097→          </div>
+  1098→          <Field label="المزود">
+  1099→            <Select value={s.smsProvider || 'smsmisr'} onValueChange={(v) => upd('smsProvider', v)}>
+  1100→              <SelectTrigger className="field" aria-label="مزود الـ SMS"><SelectValue /></SelectTrigger>
+  1101→              <SelectContent className="border-[2.5px] border-ink rounded-xl">
+  1102→                <SelectItem value="smsmisr">SMSMisr — مزود مصري (رصيد تجريبي مجاني)</SelectItem>
+  1103→                <SelectItem value="custom">بوابة مخصصة (Victory Links أو غيرها)</SelectItem>
+  1104→              </SelectContent>
+  1105→            </Select>
+  1106→          </Field>
+  1107→
+  1108→          {(s.smsProvider || 'smsmisr') === 'smsmisr' ? (
+  1109→            <div className="grid sm:grid-cols-2 gap-4">
+  1110→              <Field label="Username"><Input dir="ltr" value={s.smsMisrUsername || ''} onChange={(e) => upd('smsMisrUsername', e.target.value)} className="field" autoComplete="off" /></Field>
+  1111→              <Field label="Password"><Input type="password" dir="ltr" value={s.smsMisrPassword || ''} onChange={(e) => upd('smsMisrPassword', e.target.value)} className="field" autoComplete="new-password" /></Field>
+  1112→              <Field label="Token (API Key)"><Input type="password" dir="ltr" value={s.smsMisrToken || ''} onChange={(e) => upd('smsMisrToken', e.target.value)} className="field" autoComplete="new-password" /></Field>
+  1113→              <Field label="اسم المرسل (Sender)"><Input dir="ltr" value={s.smsMisrSender || ''} onChange={(e) => upd('smsMisrSender', e.target.value)} className="field" /></Field>
+  1114→              <Field label="البيئة">
+  1115→                <Select value={s.smsMisrEnvironment || '2'} onValueChange={(v) => upd('smsMisrEnvironment', v)}>
+  1116→                  <SelectTrigger className="field" aria-label="بيئة SMSMisr"><SelectValue /></SelectTrigger>
+  1117→                  <SelectContent className="border-[2.5px] border-ink rounded-xl">
+  1118→                    <SelectItem value="1">تجريبية (environment = 1)</SelectItem>
+  1119→                    <SelectItem value="2">إنتاج (environment = 2)</SelectItem>
+  1120→                  </SelectContent>
+  1121→                </Select>
+  1122→              </Field>
+  1123→              <p className="sm:col-span-2 text-[11px] font-bold text-muted-foreground leading-relaxed">
+  1124→                الأرقام بتتبعت بصيغة دولية تلقائيًا (01200506224 ← 201200506224)، والرسائل العربية بتتبعت Unicode تلقائيًا.
+  1125→              </p>
+  1126→            </div>
+  1127→          ) : (
+  1128→            <div className="grid sm:grid-cols-3 gap-4">
+  1129→              <div className="sm:col-span-3">
+  1130→                <Field label="رابط البوابة (POST JSON — to / message / sender)">
+  1131→                  <Input dir="ltr" value={s.smsGatewayUrl || ''} onChange={(e) => upd('smsGatewayUrl', e.target.value)} className="field" placeholder="https://your-provider.example.com/api/send" />
+  1132→                </Field>
+  1133→              </div>
+  1134→              <Field label="مفتاح البوابة (Bearer)"><Input type="password" dir="ltr" value={s.smsGatewayKey || ''} onChange={(e) => upd('smsGatewayKey', e.target.value)} className="field" placeholder="••••••" /></Field>
+  1135→              <Field label="اسم المرسل"><Input dir="ltr" value={s.smsSenderName || ''} onChange={(e) => upd('smsSenderName', e.target.value)} className="field" /></Field>
+  1136→            </div>
+  1137→          )}
+  1138→
+  1139→          <label className="flex items-center gap-3 text-sm font-bold">
+  1140→            <Switch checked={s.hideDevOtp === '1'} onCheckedChange={(v) => upd('hideDevOtp', v ? '1' : '0')} aria-label="إخفاء أكواد التطوير" />
+  1141→            اخفِ أكواد التحقق من الشاشة (فعّلها بعد ما تربط المزود الحقيقي)
+  1142→          </label>
+  1143→        </div>
+  1144→      </Reveal>
+  1145→
+  1146→      <Reveal delay={0.1}>
+  1147→        <div className="bg-white nb rounded-2xl p-5 space-y-4">
+  1148→          <div className="flex items-center justify-between">
+  1149→            <p className="font-extrabold text-sm flex items-center gap-1.5">
+  1150→              <Send className="h-4 w-4 text-grape" aria-hidden /> مزود الإيميل — أكواد التسجيل بالايميل
+  1151→            </p>
+  1152→            <span className={`rounded-lg border-2 border-ink px-2.5 py-1 text-[11px] font-extrabold ${s.emailConfigured ? 'bg-lime' : 'bg-peach'}`}>
+  1153→              {s.emailConfigured ? 'مربوطة' : 'غير مربوطة — أكواد بتظهر في وضع التطوير'}
+  1154→            </span>
+  1155→          </div>
+  1156→          <Field label="المزود">
+  1157→            <Select value={s.emailProvider || 'resend'} onValueChange={(v) => upd('emailProvider', v)}>
+  1158→              <SelectTrigger className="field" aria-label="مزود الإيميل"><SelectValue /></SelectTrigger>
+  1159→              <SelectContent className="border-[2.5px] border-ink rounded-xl">
+  1160→                <SelectItem value="resend">Resend — خطة مجانية (100 رسالة/يوم)</SelectItem>
+  1161→                <SelectItem value="custom">بوابة مخصصة</SelectItem>
+  1162→              </SelectContent>
+  1163→            </Select>
+  1164→          </Field>
+  1165→
+  1166→          {(s.emailProvider || 'resend') === 'resend' ? (
+  1167→            <div className="grid sm:grid-cols-2 gap-4">
+  1168→              <Field label="Resend API Key"><Input type="password" dir="ltr" value={s.resendApiKey || ''} onChange={(e) => upd('resendApiKey', e.target.value)} className="field" autoComplete="new-password" placeholder="re_..." /></Field>
+  1169→              <Field label="عنوان المرسل (From)"><Input dir="ltr" value={s.emailFromAddress || ''} onChange={(e) => upd('emailFromAddress', e.target.value)} className="field" placeholder="onboarding@resend.dev" /></Field>
+  1170→              <Field label="اسم المرسل"><Input dir="ltr" value={s.emailFromName || ''} onChange={(e) => upd('emailFromName', e.target.value)} className="field" /></Field>
+  1171→              <p className="sm:col-span-2 text-[11px] font-bold text-muted-foreground leading-relaxed">
+  1172→                ابدأ بـ onboarding@resend.dev (شغالة فورًا مجانًا) — ولما تربط دومينك من لوحة Resend غيّر العنوان لـ no-reply@yourdomain.com.
+  1173→              </p>
+  1174→            </div>
+  1175→          ) : (
+  1176→            <div className="grid sm:grid-cols-3 gap-4">
+  1177→              <div className="sm:col-span-3">
+  1178→                <Field label="رابط البوابة (POST JSON — to / subject / html)">
+  1179→                  <Input dir="ltr" value={s.emailGatewayUrl || ''} onChange={(e) => upd('emailGatewayUrl', e.target.value)} className="field" placeholder="https://your-email-provider.example.com/api/send" />
+  1180→                </Field>
+  1181→              </div>
+  1182→              <Field label="مفتاح البوابة (Bearer)"><Input type="password" dir="ltr" value={s.emailGatewayKey || ''} onChange={(e) => upd('emailGatewayKey', e.target.value)} className="field" placeholder="••••••" /></Field>
+  1183→              <Field label="اسم المرسل"><Input dir="ltr" value={s.emailFromName || ''} onChange={(e) => upd('emailFromName', e.target.value)} className="field" /></Field>
+  1184→            </div>
+  1185→          )}
+  1186→        </div>
+  1187→      </Reveal>
+  1188→
+  1189→      {isSuper && (
+  1190→        <Reveal delay={0.12}>
+  1191→          <div className="bg-white nb rounded-2xl p-5 space-y-4">
+  1192→            <p className="font-extrabold text-sm flex items-center gap-1.5">
+  1193→              <KeyRound className="h-4 w-4 text-grape" aria-hidden /> كلمة سر الأدمن — الطبقة التانية للحماية
+  1194→            </p>
+  1195→            <p className="text-xs font-bold text-muted-foreground">
+  1196→              كل مسؤول بيدخل بكود SMS على رقمه + كلمة السر دي. غيّرها بانتظام ومتشاركهاش مع حد مش مسؤول.
+  1197→            </p>
+  1198→            <div className="grid sm:grid-cols-3 gap-4">
+  1199→              <Field label="كلمة السر الحالية">
+  1200→                <Input type="password" dir="ltr" value={pwForm.current} onChange={(e) => setPwForm({ ...pwForm, current: e.target.value })} className="field" autoComplete="current-password" />
+  1201→              </Field>
+  1202→              <Field label="الجديدة (8+ حروف وأرقام)">
+  1203→                <Input type="password" dir="ltr" value={pwForm.next} onChange={(e) => setPwForm({ ...pwForm, next: e.target.value })} className="field" autoComplete="new-password" />
+  1204→              </Field>
+  1205→              <Field label="تأكيد الجديدة">
+  1206→                <Input type="password" dir="ltr" value={pwForm.confirm} onChange={(e) => setPwForm({ ...pwForm, confirm: e.target.value })} className="field" autoComplete="new-password" />
+  1207→              </Field>
+  1208→            </div>
+  1209→            <Button
+  1210→              onClick={changePassword}
+  1211→              disabled={pwBusy || !pwForm.current || pwForm.next.length < 8 || pwForm.next !== pwForm.confirm}
+  1212→              className="gap-1.5 font-extrabold bg-grape text-cream border-[3px] border-ink rounded-xl shadow-[3px_3px_0_0_var(--ink)] hover:bg-grape/90 min-h-[46px] disabled:opacity-50 disabled:shadow-none"
+  1213→            >
+  1214→              {pwBusy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <KeyRound className="h-4 w-4" aria-hidden />} تغيير كلمة السر
+  1215→            </Button>
+  1216→          </div>
+  1217→        </Reveal>
+  1218→      )}
+  1219→
+  1220→      <Reveal delay={0.15}>
+  1221→        <div className="bg-lilac/50 border-[3px] border-ink rounded-2xl p-5 space-y-3">
+  1222→          <p className="font-extrabold text-sm">اختبر البوابات قبل ما تعتمدها</p>
+  1223→          <div className="flex flex-col sm:flex-row gap-2">
+  1224→            <Input
+  1225→              value={testTarget}
+  1226→              onChange={(e) => setTestTarget(e.target.value)}
+  1227→              placeholder="رقم أو إيميل للتجربة"
+  1228→              className="flex-1 font-bold bg-white border-[2.5px] border-ink rounded-xl h-12"
+  1229→              dir="ltr"
+  1230→              aria-label="هدف رسالة التجربة"
+  1231→            />
+  1232→            <Button onClick={() => testSend('sms')} disabled={testing !== null || !testTarget} variant="outline" className="gap-1.5 font-extrabold border-[2.5px] border-ink rounded-xl bg-white hover:bg-lime/40 min-h-[48px]">
+  1233→              {testing === 'sms' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />} تجربة SMS
+  1234→            </Button>
+  1235→            <Button onClick={() => testSend('email')} disabled={testing !== null || !testTarget} variant="outline" className="gap-1.5 font-extrabold border-[2.5px] border-ink rounded-xl bg-white hover:bg-lime/40 min-h-[48px]">
+  1236→              {testing === 'email' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />} تجربة إيميل
+  1237→            </Button>
+  1238→          </div>
+  1239→        </div>
+  1240→      </Reveal>
+  1241→
+  1242→      <Button onClick={save} disabled={saving} className="w-full min-h-[54px] text-base font-extrabold rounded-xl border-[3px] border-ink bg-lime text-ink shadow-[4px_4px_0_0_var(--ink)] hover:bg-lime/90 disabled:opacity-50">
+  1243→        {saving ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> : 'حفظ الإعدادات'}
+  1244→      </Button>
+  1245→    </div>
+  1246→  )
+  1247→}
+  1248→
+  1249→// ---------- عناصر مساعدة ----------
+  1250→function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  1251→  return (
+  1252→    <div className="space-y-1.5">
+  1253→      <Label className="font-extrabold text-xs">{label}</Label>
+  1254→      {children}
+  1255→    </div>
+  1256→  )
+  1257→}
+  1258→
+  1259→function CenterSpinner() {
+  1260→  return (
+  1261→    <div className="flex items-center justify-center py-16">
+  1262→      <Loader2 className="h-7 w-7 animate-spin text-grape" aria-label="تحميل" />
+  1263→    </div>
+  1264→  )
+  1265→}
+  1266→

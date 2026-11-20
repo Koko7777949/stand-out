@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 128">
+  <g transform="translate(8,8)">
+    <rect width="112" height="112" rx="24" fill="#211434"/>
+    <path d="M76 10l4.6 11.4L92 26l-11.4 4.6L76 42l-4.6-11.4L60 26l11.4-4.6z" fill="#c6da91"/>
+    <text x="51" y="83" font-family="Arial Black, Arial, sans-serif" font-size="58" font-weight="900" letter-spacing="-3" text-anchor="middle" fill="#ffdda9">S</text>
+    <text x="48" y="79" font-family="Arial Black, Arial, sans-serif" font-size="58" font-weight="900" letter-spacing="-3" text-anchor="middle" fill="#fffbf2">S</text>
+    <rect x="24" y="88" width="48" height="8" rx="4" fill="#7b3ff2" transform="rotate(-3 48 92)"/>
+  </g>
+  <text x="140" y="60" font-family="Arial Black, Arial, sans-serif" font-size="46" font-weight="900" letter-spacing="1" fill="#211434">STAND</text>
+  <text x="140" y="106" font-family="Arial Black, Arial, sans-serif" font-size="46" font-weight="900" letter-spacing="1" fill="#7b3ff2">OUT.</text>
+</svg>

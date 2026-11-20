@@ -1,0 +1,278 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// المستخدمون — رقم موبايل متحقق منه واحد لكل حساب
+model User {
+  id               String    @id @default(cuid())
+  name             String
+  phone            String?   @unique
+  email            String?   @unique
+  emailVerifiedAt  DateTime?
+  phoneVerifiedAt  DateTime?
+  provider         String    @default("phone") // phone | google_demo
+  role             String    @default("attendee") // attendee | staff | admin | super_admin
+  status           String    @default("active") // active | blocked
+  referralCode     String    @unique
+  referredById     String?
+  hideName         Boolean   @default(false)
+  locale           String    @default("ar")
+  consentAt        DateTime?
+  lastLoginAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  referredBy   User?      @relation("ReferralChain", fields: [referredById], references: [id], onDelete: SetNull)
+  referredByMe User[]     @relation("ReferralChain")
+  sessions     Session[]
+  orders       Order[]
+  tickets      Ticket[]
+  ledger       PointsLedger[]
+  referralsOut Referral[] @relation("Referrer")
+  referralsIn  Referral[] @relation("Referred")
+  redemptions  Redemption[]
+}
+
+model Session {
+  id         String    @id @default(cuid())
+  tokenHash  String    @unique
+  userId     String
+  deviceInfo String?
+  ipHash     String?
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model OtpCode {
+  id         String    @id @default(cuid())
+  target     String    // رقم الموبايل أو الإيميل
+  channel    String    @default("sms") // sms | email
+  codeHash   String
+  expiresAt  DateTime
+  attempts   Int       @default(0)
+  consumedAt DateTime?
+  ipHash     String?
+  createdAt  DateTime  @default(now())
+
+  @@index([target, channel, createdAt])
+}
+
+// الايفنت — الإعدادات بتتخزن هنا مش في الكود
+model Event {
+  id              String   @id @default(cuid())
+  slug            String   @unique
+  name            String
+  startsAt        DateTime
+  venue           String
+  city            String
+  active          Boolean  @default(false) // الايفنت المفعّل هو الوحيد اللي بيظهر للعامة
+  capacity        Int
+  heldCount       Int      @default(0)
+  soldCount       Int      @default(0)
+  priceMinor      Int      // بالقروش — بدون كسور عشرية
+  currency        String   @default("EGP")
+  holdMinutes     Int      @default(15)
+  bookingOpensAt  DateTime @default(now())
+  bookingClosesAt DateTime
+  ageMin          Int      @default(16)
+  ageMax          Int      @default(45)
+  settings        String   @default("{}") // JSON
+  createdAt       DateTime @default(now())
+
+  orders  Order[]
+  tickets Ticket[]
+}
+
+model Order {
+  id            String    @id @default(cuid())
+  userId        String
+  eventId       String
+  status        String    @default("HELD") // HELD | PENDING | PAID | EXPIRED | FAILED | REFUNDED | REVIEW
+  amountMinor   Int
+  currency      String    @default("EGP")
+  holdExpiresAt DateTime?
+  paymentMethod String?
+  providerRef   String?   @unique
+  paidAt        DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event    Event     @relation(fields: [eventId], references: [id])
+  ticket   Ticket?
+  payments Payment[]
+
+  @@index([userId, status])
+  @@index([eventId, status])
+  @@index([holdExpiresAt, status])
+}
+
+// سجل الدفعات — مفيش بيانات حساسة نهائي
+model Payment {
+  id                   String    @id @default(cuid())
+  orderId              String
+  provider             String    @default("mock")
+  providerRef          String    @unique
+  providerTransactionId String?  @unique
+  status               String    @default("PENDING") // PENDING | PAID | FAILED
+  amountMinor          Int
+  method               String    // instapay | vodafone_cash | orange_cash | etisalat_cash | we_pay | card
+  idempotencyKey       String    @unique
+  webhookReceivedAt    DateTime?
+  createdAt            DateTime  @default(now())
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@index([orderId])
+}
+
+model Ticket {
+  id          String    @id @default(cuid())
+  orderId     String    @unique
+  userId      String
+  eventId     String
+  status      String    @default("DRAFT") // DRAFT | HELD | ISSUED | USED | EXPIRED | CANCELLED
+  holderName  String
+  holderAge   Int
+  governorate String
+  serial      String    @unique
+  qrTokenHash String?
+  issuedAt    DateTime?
+  usedAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  order Order @relation(fields: [orderId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+  event Event @relation(fields: [eventId], references: [id])
+
+  @@index([userId])
+  @@index([serial])
+}
+
+// الإحالات — النقاط بتتحسب بس لما صاحبك يسجّل ويأكد حسابه
+model Referral {
+  id             String    @id @default(cuid())
+  referrerId     String
+  referredUserId String    @unique
+  status         String    @default("PENDING") // PENDING | QUALIFIED | REVIEW | REJECTED
+  qualifiedAt    DateTime?
+  ipHash         String?
+  fraudFlags     String    @default("[]") // JSON
+  createdAt      DateTime  @default(now())
+
+  referrer     User @relation("Referrer", fields: [referrerId], references: [id], onDelete: Cascade)
+  referredUser User @relation("Referred", fields: [referredUserId], references: [id], onDelete: Cascade)
+
+  @@index([referrerId, status])
+}
+
+model ReferralClick {
+  id        String   @id @default(cuid())
+  code      String
+  ipHash    String?
+  uaHash    String?
+  createdAt DateTime @default(now())
+
+  @@index([code])
+}
+
+// مستويات النقاط
+model PointsTier {
+  id           String  @id @default(cuid())
+  minReferrals Int
+  totalPoints  Int
+  active       Boolean @default(true)
+}
+
+// دفتر النقاط — Append-only، ممنوع تعديل أو حذف سطور
+model PointsLedger {
+  id        String   @id @default(cuid())
+  userId    String
+  delta     Int
+  reason    String   // TIER_AWARD | REDEEM | REVERSAL | MANUAL
+  refType   String?
+  refId     String?
+  note      String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Reward {
+  id          String  @id @default(cuid())
+  name        String
+  description String
+  pointsCost  Int
+  stock       Int     @default(0)
+  icon        String  @default("gift")
+  active      Boolean @default(true)
+  sortOrder   Int     @default(0)
+
+  redemptions Redemption[]
+}
+
+model Redemption {
+  id         String    @id @default(cuid())
+  userId     String
+  rewardId   String
+  pointsSpent Int
+  status     String    @default("PENDING") // PENDING | FULFILLED | CANCELLED
+  createdAt  DateTime  @default(now())
+  fulfilledAt DateTime?
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reward Reward @relation(fields: [rewardId], references: [id])
+
+  @@index([userId])
+}
+
+// حسابات استلام الفلوس — بتتدار من لوحة تحكم الأدمن
+model PaymentAccount {
+  id            String   @id @default(cuid())
+  method        String   // instapay | vodafone_cash | orange_cash | etisalat_cash | we_pay | card
+  label         String
+  accountName   String
+  accountNumber String
+  // لينك فتح التطبيق للتحويل — الأدمن بيكتب قالب فيه {account} {amount} {reference}
+  // مثال انستاباي: ipn://{account}?amount={amount}&ref={reference}
+  // مثال محفظة:    walletapp://transfer?to={account}&amount={amount}
+  deepLinkTemplate String?
+  instructions  String?
+  active        Boolean  @default(true)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  @@index([method, active])
+}
+
+// إعدادات النظام — اسم الموقع، بيانات التواصل، و مزودات الرسائل
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+// سجل التدقيق — كل فعل إداري أو حساس
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  action    String
+  entity    String
+  entityId  String?
+  detail    String?
+  ipHash    String?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+}
