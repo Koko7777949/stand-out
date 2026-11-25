@@ -1,29 +1,18 @@
 import { getSettings } from '@/lib/settings'
 
-// ---- مزودات الرسائل الحقيقية ----
-// WhatsApp (الأساسي لأكواد الموبايل — حسب طلب صاحب الموقع):
-//   ultramsg : POST https://api.ultramsg.com/{instance}/messages/chat — JSON { token, to, body }
-//              to بصيغة دولية: 201200506224 — الرد الناجح: { sent: "true", id: "..." }
-//   meta     : WhatsApp Cloud API الرسمي — POST https://graph.facebook.com/v21.0/{phoneId}/messages
-//              Bearer token — نص حر جوه نافذة 24 ساعة، أو Template معتمد بمتغير {{1}} للكود
-//   greenapi : POST https://api.green-api.com/waInstance{id}/sendMessage/{token} — { chatId: "2012...@c.us", message }
-//   twilio   : POST https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json — Basic auth
-//              From/To بصيغة whatsapp:+20... — الرد 201/200 عند النجاح
-//   custom   : بوابة مخصصة POST JSON { to, message, sender } + Bearer اختياري
-// SMS (احتياطي لو واتساب مش مربوط):
-//   SMSMisr  : POST https://smsmisr.com/api/SMS — form-urlencoded
-//              { environment, username, password, token, Phone, Message, sender, language }
-//              الرد الناجح: { "code": "1901" }
-// Email: Resend (خطة مجانية 100 رسالة/يوم و 3000/شهر)
+// ---- مزودات الرسائل ----
+// الموبايل: كود التحقق بيوصل على واتساب الرقم اللي عايزين نتحقق منه (بدون SMS نهائيًا)
+//   UltraMsg : POST https://api.ultramsg.com/{instance}/messages/chat — JSON { token, to, body, priority, referenceId, msgId, mentions }
+//              to بصيغة دولية: 01200506224 ← 201200506224 — الرد الناجح: { sent: "true", id: "..." }
+//              البيانات من متغيرات البيئة: ULTRAMSG_INSTANCE + ULTRAMSG_TOKEN (سيرفر فقط)
+// الإيميل: Resend (خطة مجانية 100 رسالة/يوم)
 //   POST https://api.resend.com/emails — Bearer RESEND_API_KEY
 //   { "from": "Stand Out <onboarding@resend.dev>", "to": ["..."], "subject", "text", "html" }
-// وكل ده ممكن يتظبط من لوحة تحكم الأدمن أو من متغيرات البيئة.
 
-const SMSMISR_ENDPOINT = 'https://smsmisr.com/api/SMS'
 const RESEND_ENDPOINT = 'https://api.resend.com/emails'
 const ARABIC_RE = /[\u0600-\u06FF]/
 
-// 01200506224 → 201200506224 (الصيغة الدولية اللي المزودات بيقبلوها)
+// 01200506224 → 201200506224 (الصيغة الدولية اللي المزود بيقبلها)
 function toInternationalPhone(egyptianLocal: string): string {
   const digits = egyptianLocal.replace(/\D/g, '')
   return digits.startsWith('20') ? digits : '20' + digits.replace(/^0/, '')
@@ -53,15 +42,14 @@ function brandedEmailHtml(subject: string, code: string): string {
 </div>`
 }
 
-// ===================== WhatsApp =====================
+// ===================== WhatsApp (UltraMsg) =====================
 
-// UltraMsg — أسهل وأرخص مزود واتساب لمصر: instance + token من لوحة الحساب
+// UltraMsg — مزود واتساب المعتمد للموقع: instance + token من متغيرات البيئة
 // الطلب مطابق للمثال الرسمي بالحرف — كل الحقول موجودة حتى الفاضية منها:
 // { token, to, body, priority, referenceId, msgId, mentions }
 async function sendViaUltraMsg(to: string, message: string): Promise<boolean> {
-  const s = await getSettings()
-  const instance = (s.ultramsgInstance || process.env.ULTRAMSG_INSTANCE || '').trim()
-  const token = (s.ultramsgToken || process.env.ULTRAMSG_TOKEN || '').trim()
+  const instance = (process.env.ULTRAMSG_INSTANCE || '').trim()
+  const token = (process.env.ULTRAMSG_TOKEN || '').trim()
   if (!instance || !token) return false
   try {
     const res = await fetch(`https://api.ultramsg.com/${encodeURIComponent(instance)}/messages/chat`, {
@@ -109,225 +97,14 @@ async function sendViaUltraMsg(to: string, message: string): Promise<boolean> {
   }
 }
 
-// Meta WhatsApp Cloud API — الرسمي. لو محدد اسم Template معتمد بنبعت Template بمتغير {{1}} = الكود،
-// لو مش محدد بنبعت نص حر (بيشتغل لو المستخدم كلم الرقم قبل كده جوه 24 ساعة).
-async function sendViaMetaWhatsapp(to: string, message: string, code?: string): Promise<boolean> {
-  const s = await getSettings()
-  const token = s.metaWhatsappToken || process.env.META_WHATSAPP_TOKEN || ''
-  const phoneId = s.metaPhoneNumberId || process.env.META_PHONE_NUMBER_ID || ''
-  if (!token || !phoneId) return false
-
-  const intl = toInternationalPhone(to)
-  const templateName = (s.metaWhatsappTemplateName || '').trim()
-  let payload: unknown
-  if (templateName && code) {
-    payload = {
-      messaging_product: 'whatsapp',
-      recipient_type: 'individual',
-      to: intl,
-      type: 'template',
-      template: {
-        name: templateName,
-        language: { code: s.metaWhatsappTemplateLang || 'ar' },
-        components: [{ type: 'body', parameters: [{ type: 'text', text: code }] }],
-      },
-    }
-  } else {
-    payload = {
-      messaging_product: 'whatsapp',
-      recipient_type: 'individual',
-      to: intl,
-      type: 'text',
-      text: { preview_url: false, body: message },
-    }
-  }
-
-  try {
-    const res = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(phoneId)}/messages`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: timeout(12000),
-    })
-    return res.ok
-  } catch {
-    return false
-  }
-}
-
-// Green API — مزود واتساب تاني منتشر (instance + token)
-async function sendViaGreenApi(to: string, message: string): Promise<boolean> {
-  const s = await getSettings()
-  const id = s.greenApiInstance || process.env.GREEN_API_INSTANCE || ''
-  const token = s.greenApiToken || process.env.GREEN_API_TOKEN || ''
-  if (!id || !token) return false
-  try {
-    const res = await fetch(`https://api.green-api.com/waInstance${encodeURIComponent(id)}/sendMessage/${encodeURIComponent(token)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chatId: `${toInternationalPhone(to)}@c.us`, message }),
-      signal: timeout(12000),
-    })
-    if (!res.ok) return false
-    const data = (await res.json().catch(() => null)) as { idMessage?: string } | null
-    return !!data?.idMessage
-  } catch {
-    return false
-  }
-}
-
-// Twilio WhatsApp — From/To لازم يبدأوا بـ whatsapp:
-async function sendViaTwilioWhatsapp(to: string, message: string): Promise<boolean> {
-  const s = await getSettings()
-  const sid = s.twilioAccountSid || process.env.TWILIO_ACCOUNT_SID || ''
-  const authToken = s.twilioAuthToken || process.env.TWILIO_AUTH_TOKEN || ''
-  const from = s.twilioWhatsappFrom || process.env.TWILIO_WHATSAPP_FROM || 'whatsapp:+14155238886'
-  if (!sid || !authToken) return false
-  try {
-    const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(sid)}/Messages.json`, {
-      method: 'POST',
-      headers: {
-        Authorization: 'Basic ' + Buffer.from(`${sid}:${authToken}`).toString('base64'),
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        From: from.startsWith('whatsapp:') ? from : `whatsapp:${from}`,
-        To: `whatsapp:+${toInternationalPhone(to)}`,
-        Body: message,
-      }).toString(),
-      signal: timeout(12000),
-    })
-    return res.ok
-  } catch {
-    return false
-  }
-}
-
-// بوابة واتساب مخصصة (أي مزود بيقبل POST JSON: to / message / sender)
-async function sendViaCustomWhatsapp(to: string, message: string): Promise<boolean> {
-  const s = await getSettings()
-  if (!s.whatsappGatewayUrl) return false
-  try {
-    const res = await fetch(s.whatsappGatewayUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(s.whatsappGatewayKey ? { Authorization: `Bearer ${s.whatsappGatewayKey}` } : {}),
-      },
-      body: JSON.stringify({
-        to: toInternationalPhone(to),
-        message,
-        text: message,
-        body: message,
-        sender: s.smsSenderName || 'StandOut',
-      }),
-      signal: timeout(10000),
-    })
-    return res.ok
-  } catch {
-    return false
-  }
-}
-
-// هل واتساب مربوط ومظبوط؟ (بيتستخدم في منطق الاحتياطي وفي لوحة الأدمن)
+// هل واتساب مربوط؟ (بيتستخدم في منطق كود التطوير وفي فحص التجربة)
 export async function whatsappConfigured(): Promise<boolean> {
-  const s = await getSettings()
-  const p = s.whatsappProvider || 'ultramsg'
-  if (p === 'ultramsg') {
-    return !!(s.ultramsgInstance && s.ultramsgToken) ||
-      !!(process.env.ULTRAMSG_INSTANCE && process.env.ULTRAMSG_TOKEN)
-  }
-  if (p === 'meta') {
-    return !!(s.metaWhatsappToken && s.metaPhoneNumberId) ||
-      !!(process.env.META_WHATSAPP_TOKEN && process.env.META_PHONE_NUMBER_ID)
-  }
-  if (p === 'greenapi') {
-    return !!(s.greenApiInstance && s.greenApiToken) ||
-      !!(process.env.GREEN_API_INSTANCE && process.env.GREEN_API_TOKEN)
-  }
-  if (p === 'twilio') {
-    return !!(s.twilioAccountSid && s.twilioAuthToken) ||
-      !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN)
-  }
-  if (p === 'custom') return !!s.whatsappGatewayUrl
-  return false
+  return !!(process.env.ULTRAMSG_INSTANCE && process.env.ULTRAMSG_TOKEN)
 }
 
-// إرسال واتساب — بيفحص المزود المختار من الإعدادات، و code بيتبعت للمزودات اللي شغالة بـ Template
-export async function sendWhatsApp(to: string, message: string, code?: string): Promise<boolean> {
-  const s = await getSettings()
-  const p = s.whatsappProvider || 'ultramsg'
-  switch (p) {
-    case 'meta': return sendViaMetaWhatsapp(to, message, code)
-    case 'greenapi': return sendViaGreenApi(to, message)
-    case 'twilio': return sendViaTwilioWhatsapp(to, message)
-    case 'custom': return sendViaCustomWhatsapp(to, message)
-    default: return sendViaUltraMsg(to, message)
-  }
-}
-
-// ===================== SMS (احتياطي) =====================
-
-// SMSMisr بيرد JSON { code: "1901" } عند النجاح — أي كود تاني يعتبر فشل بسببه
-async function sendViaSmsMisr(to: string, message: string): Promise<boolean> {
-  const s = await getSettings()
-  const username = s.smsMisrUsername || process.env.SMSMISR_USERNAME || ''
-  const password = s.smsMisrPassword || process.env.SMSMISR_PASSWORD || ''
-  const token = s.smsMisrToken || process.env.SMSMISR_TOKEN || ''
-  if (!username || !password || !token) return false
-
-  const payload: Record<string, string> = {
-    environment: s.smsMisrEnvironment === '1' ? '1' : '2', // 1 تجريبية / 2 إنتاج
-    username,
-    password,
-    token,
-    Phone: toInternationalPhone(to),
-    Message: message,
-    sender: s.smsMisrSender || s.smsSenderName || 'StandOut',
-    language: ARABIC_RE.test(message) ? '2' : '1', // 2 = عربي (Unicode)
-  }
-
-  try {
-    const res = await fetch(SMSMISR_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams(payload).toString(),
-      signal: timeout(10000),
-    })
-    if (!res.ok) return false
-    const data = (await res.json().catch(() => null)) as { code?: string | number } | null
-    return String(data?.code ?? '') === '1901'
-  } catch {
-    return false
-  }
-}
-
-// بوابة مخصصة (Victory Links أو أي مزود بيقبل POST JSON: to / message / sender)
-async function sendViaCustomSms(to: string, message: string): Promise<boolean> {
-  const s = await getSettings()
-  if (!s.smsGatewayUrl) return false
-  try {
-    const res = await fetch(s.smsGatewayUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(s.smsGatewayKey ? { Authorization: `Bearer ${s.smsGatewayKey}` } : {}),
-      },
-      body: JSON.stringify({ to, message, text: message, sender: s.smsSenderName || 'StandOut' }),
-      signal: timeout(8000),
-    })
-    return res.ok
-  } catch {
-    return false
-  }
-}
-
-export async function sendSms(to: string, message: string): Promise<boolean> {
-  const s = await getSettings()
-  const provider = s.smsProvider === 'custom' ? 'custom' : 'smsmisr'
-  return provider === 'custom'
-    ? sendViaCustomSms(to, message)
-    : sendViaSmsMisr(to, message)
+// إرسال واتساب — القناة الوحيدة لأكواد الموبايل (بدون SMS)
+export async function sendWhatsApp(to: string, message: string): Promise<boolean> {
+  return sendViaUltraMsg(to, message)
 }
 
 // ===================== Email (Resend) =====================
@@ -335,7 +112,7 @@ export async function sendSms(to: string, message: string): Promise<boolean> {
 // Resend بيرد 200 مع { id } عند النجاح
 async function sendViaResend(to: string, subject: string, code: string): Promise<boolean> {
   const s = await getSettings()
-  const apiKey = s.resendApiKey || process.env.RESEND_API_KEY || ''
+  const apiKey = process.env.RESEND_API_KEY || s.resendApiKey || ''
   if (!apiKey) return false
 
   const address = s.emailFromAddress || process.env.RESEND_FROM || 'onboarding@resend.dev'

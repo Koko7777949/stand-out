@@ -102,6 +102,7 @@ model Order {
   holdExpiresAt DateTime?
   paymentMethod String?
   providerRef   String?   @unique
+  promoCode     String? // كود السفير — بيتكتب في طلب المراجعة قبل/بعد الدفع
   paidAt        DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -114,6 +115,7 @@ model Order {
   @@index([userId, status])
   @@index([eventId, status])
   @@index([holdExpiresAt, status])
+  @@index([promoCode])
 }
 
 // سجل الدفعات — مفيش بيانات حساسة نهائي
@@ -254,6 +256,17 @@ model PaymentAccount {
   createdAt     DateTime @default(now())
 
   @@index([method, active])
+}
+
+// السفراء — كل سفير ليه كود برومو بيتكتب في طلب المراجعة وقت الدفع
+model Ambassador {
+  id        String   @id @default(cuid())
+  code      String   @unique // كود موحد كبير الحروف — BYF-MAZEN مثلًا
+  name      String
+  active    Boolean  @default(true)
+  uses      Int      @default(0) // عدد الطلبات اللي اتمسحت بيها
+  note      String?
+  createdAt DateTime @default(now())
 }
 
 // إعدادات النظام — اسم الموقع، بيانات التواصل، و مزودات الرسائل

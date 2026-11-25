@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Loader2, ShieldCheck, Lock, Copy, TimerReset, Smartphone,
-  AlertTriangle, Zap, RefreshCw, ExternalLink,
+  AlertTriangle, Zap, RefreshCw, ExternalLink, BadgePercent, CheckCircle2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -21,6 +21,7 @@ type OrderData = {
     amountMinor: number
     currency: string
     holdExpiresAt: string | null
+    promoCode: string | null
     eventName: string
     startsAt: string
     venue: string
@@ -40,6 +41,9 @@ export function PaymentGate({ orderId, onPaid, onExpired }: { orderId: string; o
   const [now, setNow] = useState(Date.now())
   const [methods, setMethods] = useState<DynamicMethod[] | null>(null)
   const [claimed, setClaimed] = useState(false)
+  const [promoInput, setPromoInput] = useState('')
+  const [promoApplying, setPromoApplying] = useState(false)
+  const [promoInfo, setPromoInfo] = useState<{ code: string; name: string } | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const paidRef = useRef(false)
 
@@ -55,6 +59,7 @@ export function PaymentGate({ orderId, onPaid, onExpired }: { orderId: string; o
       const r = await api<OrderData>(`/api/orders/${orderId}`)
       setOrder(r)
       if (r.order.status === 'PENDING') setClaimed(true)
+      if (r.order.promoCode && !promoInfo) setPromoInfo({ code: r.order.promoCode, name: '' })
       if (r.order.status === 'PAID' && !paidRef.current) {
         paidRef.current = true
         onPaid()
@@ -64,7 +69,7 @@ export function PaymentGate({ orderId, onPaid, onExpired }: { orderId: string; o
     } finally {
       setLoading(false)
     }
-  }, [orderId, onPaid])
+  }, [orderId, onPaid, promoInfo])
 
   useEffect(() => {
     refresh()
@@ -129,6 +134,25 @@ export function PaymentGate({ orderId, onPaid, onExpired }: { orderId: string; o
   }
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
+
+  // ربط كود السفير بالطلب — من المساحة اللي تحت طلب المراجعة
+  const applyPromo = async () => {
+    const code = promoInput.trim().toUpperCase()
+    if (!code || promoApplying) return
+    setPromoApplying(true)
+    try {
+      const r = await api<{ applied: boolean; code: string; name: string }>(`/api/orders/${orderId}/promo`, {
+        body: { promoCode: code },
+      })
+      setPromoInfo({ code: r.code, name: r.name })
+      setPromoInput('')
+      toast.success(`كود السفير اتربط بطلبك${r.name ? ` — ${r.name}` : ''}.`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'مشكلة في تطبيق الكود')
+    } finally {
+      setPromoApplying(false)
+    }
+  }
 
   const copy = async (text: string, what: string) => {
     try {
@@ -333,6 +357,53 @@ export function PaymentGate({ orderId, onPaid, onExpired }: { orderId: string; o
                 <Copy className="h-3.5 w-3.5" aria-hidden /> نسخ
               </Button>
             </div>
+
+            {/* كود السفير — مساحة تحت طلب المراجعة: لو جاي تبع أمباسدور بيكتب الكود هنا */}
+            {promoInfo ? (
+              <div className="rounded-2xl bg-lime/40 border-2 border-ink p-4 flex items-center gap-3">
+                <CheckCircle2 className="h-5 w-5 text-grape shrink-0" aria-hidden />
+                <div>
+                  <p className="text-sm font-extrabold flex items-center gap-1.5">
+                    <BadgePercent className="h-4 w-4 text-grape" aria-hidden />
+                    كود السفير اتسجل: <span dir="ltr" className="font-serial">{promoInfo.code}</span>
+                  </p>
+                  {promoInfo.name && <p className="text-xs font-bold text-muted-foreground mt-0.5">شكرًا لدمك مع سفيرنا {promoInfo.name}</p>}
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-2xl bg-lilac/30 border-2 border-ink p-4 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-extrabold flex items-center gap-1.5">
+                    <BadgePercent className="h-4 w-4 text-grape" aria-hidden />
+                    كود السفير (اختياري)
+                  </p>
+                  <span className="text-[11px] font-bold text-muted-foreground">لو جاي بدعوة أمباسدور</span>
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    value={promoInput}
+                    onChange={(e) => setPromoInput(e.target.value.toUpperCase().slice(0, 24))}
+                    onKeyDown={(e) => { if (e.key === 'Enter') applyPromo() }}
+                    placeholder="مثلًا: BYF-MAZEN"
+                    dir="ltr"
+                    className="flex-1 font-serial font-bold bg-white border-[2.5px] border-ink rounded-xl h-11 text-center"
+                    aria-label="كود السفير"
+                    autoComplete="off"
+                  />
+                  <Button
+                    onClick={applyPromo}
+                    disabled={promoApplying || promoInput.trim().length < 3}
+                    className="gap-1.5 shrink-0 font-extrabold border-[2.5px] border-ink rounded-xl bg-ink text-cream hover:bg-grape min-h-[44px] px-4 disabled:opacity-50"
+                  >
+                    {promoApplying ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <CheckCircle2 className="h-4 w-4" aria-hidden />}
+                    تطبيق
+                  </Button>
+                </div>
+                <p className="text-[11px] font-bold text-muted-foreground">
+                  تقدر تكتبه قبل أو بعد تأكيد الدفع — أول ما الطلب يتسجل بالكود مش بيتغير تاني.
+                </p>
+              </div>
+            )}
 
             {claimed ? (
               <div className="rounded-2xl bg-lime/40 border-[3px] border-ink p-5 flex items-start gap-3">

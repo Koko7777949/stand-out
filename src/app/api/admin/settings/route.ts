@@ -2,13 +2,14 @@ import { db } from '@/lib/db'
 import { ok, fail, readJson } from '@/lib/api-helpers'
 import { requireAdmin } from '@/lib/guards'
 import { getSettings, setSettings, EDITABLE_SETTING_KEYS } from '@/lib/settings'
-import { sendSms, sendEmail, sendWhatsApp, whatsappConfigured } from '@/lib/notify'
+import { sendEmail, sendWhatsApp, whatsappConfigured } from '@/lib/notify'
 import { audit } from '@/lib/payments'
 import { normalizePhone } from '@/lib/otp'
 import { ensureBootstrap } from '@/lib/bootstrap'
 
 // إعدادات النظام — قراءة للمسؤولين، تعديل يخزن في قاعدة البيانات
-// الأسرار (أكواد المزودات) بترجع masked — ومش بتتكتب لو الأدمن سبها زي ما هي
+// مزود واتساب (UltraMsg) بقى من متغيرات البيئة فقط ومش بيرجع في الإعدادات نهائيًا
+// أسرار الإيميل بترجع masked — ومش بتتكتب لو الأدمن سبها زي ما هي
 function maskSecret(v: string | undefined | null): string {
   if (!v) return ''
   return '••••••' + String(v).slice(-4)
@@ -20,13 +21,8 @@ function isMasked(v: unknown): boolean {
 
 async function settingsPayload() {
   const s = await getSettings()
-
-  const smsMisrDb = !!(s.smsMisrUsername && s.smsMisrPassword && s.smsMisrToken)
-  const smsMisrEnv = !!(process.env.SMSMISR_USERNAME && process.env.SMSMISR_PASSWORD && process.env.SMSMISR_TOKEN)
   const emailDb = !!s.resendApiKey
   const emailEnv = !!process.env.RESEND_API_KEY
-
-  const smsConfigured = s.smsProvider === 'custom' ? !!s.smsGatewayUrl : (smsMisrDb || smsMisrEnv)
   const emailConfigured = s.emailProvider === 'custom' ? !!s.emailGatewayUrl : (emailDb || emailEnv)
   const waConfigured = await whatsappConfigured()
 
@@ -34,17 +30,8 @@ async function settingsPayload() {
 
   return {
     ...s,
-    ultramsgToken: maskSecret(s.ultramsgToken),
-    metaWhatsappToken: maskSecret(s.metaWhatsappToken),
-    greenApiToken: maskSecret(s.greenApiToken),
-    twilioAuthToken: maskSecret(s.twilioAuthToken),
-    whatsappGatewayKey: maskSecret(s.whatsappGatewayKey),
-    smsMisrPassword: maskSecret(s.smsMisrPassword),
-    smsMisrToken: maskSecret(s.smsMisrToken),
-    smsGatewayKey: maskSecret(s.smsGatewayKey),
     resendApiKey: maskSecret(s.resendApiKey),
     emailGatewayKey: maskSecret(s.emailGatewayKey),
-    smsConfigured,
     emailConfigured,
     whatsappConfigured: waConfigured,
     adminPasswordSet: !!adminPasswordRow?.value,
@@ -74,17 +61,8 @@ export async function PUT(req: Request) {
   }
 
   // تحقق من القيم الجديدة
-  if (clean.whatsappProvider && !['ultramsg', 'meta', 'greenapi', 'twilio', 'custom'].includes(clean.whatsappProvider)) {
-    return fail('مزود واتساب غير معروف.')
-  }
-  if (clean.smsProvider && !['smsmisr', 'custom'].includes(clean.smsProvider)) {
-    return fail('مزود الـ SMS غير معروف.')
-  }
   if (clean.emailProvider && !['resend', 'custom'].includes(clean.emailProvider)) {
     return fail('مزود الإيميل غير معروف.')
-  }
-  if (clean.smsMisrEnvironment && !['1', '2'].includes(clean.smsMisrEnvironment)) {
-    return fail('بيئة SMSMisr لازم تكون 1 (تجربة) أو 2 (إنتاج).')
   }
   if (clean.supportPhone) {
     const p = normalizePhone(clean.supportPhone)
@@ -104,7 +82,8 @@ export async function PUT(req: Request) {
   return ok({ settings: await settingsPayload() })
 }
 
-// اختبار المزودات — بيبعت رسالة تجربة للرقم/الايميل اللي الأدمن يحدده
+// اختبار القنوات — رسالة تجربة للرقم/الايميل اللي الأدمن يحدده
+// واتساب بيتبعت عبر UltraMsg (من متغيرات البيئة)
 export async function POST(req: Request) {
   const admin = await requireAdmin(req)
   if (!admin) return fail('الصفحة دي للأدمن بس.', 403)
@@ -117,21 +96,11 @@ export async function POST(req: Request) {
   if (channel === 'whatsapp') {
     const phone = normalizePhone(target)
     if (!phone) return fail('رقم التجربة مش صحيح.')
-    const sent = await sendWhatsApp(phone, 'رسالة تجربة من لوحة تحكم Stand Out — مزود واتساب شغال وجاهز يستقبل أكواد الدخول')
+    const sent = await sendWhatsApp(phone, 'رسالة تجربة من لوحة تحكم Stand Out — كود الدخول بيوصل واتساب على الرقم المطلوب التحقق منه')
     await audit(admin.id, 'whatsapp_test', 'setting', null, sent ? 'delivered' : 'failed')
     return sent
       ? ok({ sent: true })
-      : fail('الإرسال على واتساب فشل — راجع بيانات المزود (Instance/Token أو رقم الواتساب الرسمي) أو شغّل بوابة مخصصة.')
-  }
-
-  if (channel === 'sms') {
-    const phone = normalizePhone(target)
-    if (!phone) return fail('رقم التجربة مش صحيح.')
-    const sent = await sendSms(phone, 'رسالة تجربة من لوحة تحكم Stand Out — مزود الرسائل شغال وجاهز يستقبل أكواد الدخول')
-    await audit(admin.id, 'sms_test', 'setting', null, sent ? 'delivered' : 'failed')
-    return sent
-      ? ok({ sent: true })
-      : fail('الإرسال فشل — راجع بيانات المزود (اسم المستخدم/كلمة السر/التوكن) أو شغّل بوابة مخصصة.')
+      : fail('الإرسال على واتساب فشل — راجع ULTRAMSG_INSTANCE و ULTRAMSG_TOKEN في متغيرات البيئة.')
   }
 
   if (channel === 'email') {

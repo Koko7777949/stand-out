@@ -1,14 +1,14 @@
 import { db } from '@/lib/db'
 import { sha256, randomDigits } from '@/lib/security'
 import { limit, getClientIp } from '@/lib/rate-limit'
-import { sendWhatsApp, sendSms, sendEmail } from '@/lib/notify'
+import { sendWhatsApp, sendEmail } from '@/lib/notify'
 import { getSettings } from '@/lib/settings'
 
 // أرقام مصر: 01[0125] + 8 أرقام
 const EGY_PHONE = /^01[0125]\d{8}$/
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 
-// أكواد الموبايل بتتبعت على واتساب (حسب طلب صاحب الموقع) — والـ SMS احتياطي لو واتساب مش مربوط
+// أكواد الموبايل بتتبعت واتساب على الرقم اللي عايزين نتحقق منه — بدون SMS نهائيًا (حسب طلب صاحب الموقع)
 export type OtpChannel = 'whatsapp' | 'email'
 
 export function normalizePhone(raw: string): string | null {
@@ -31,8 +31,8 @@ export type OtpRequestResult =
   | { ok: false; error: string; retryAfterSec?: number }
 
 // طلب كود تحقق — واتساب للموبايل أو Email للإيميل
-// الرسالة بتتبعت عبر مزود واتساب (UltraMsg/Meta/GreenAPI/Twilio/بوابة مخصصة)،
-// ولو واتساب مش مربوط بيحاول SMS، ولو الاتنين مش موجودين (وضع تطوير) الكود بيرجع للشاشة
+// كود الموبايل بيوصل رسالة واتساب (UltraMsg) على الرقم المطلوب التحقق منه — بدون SMS
+// ولو واتساب مش مربوط ببيانات المزود (وضع تطوير) الكود بيرجع للشاشة
 export async function requestOtp(target: string, channel: OtpChannel, req: Request): Promise<OtpRequestResult> {
   // لكل هدف: 3 طلبات كل 10 دقائق
   const byTarget = limit(`otp:${channel}:${target}`, 3, 10 * 60 * 1000)
@@ -63,12 +63,11 @@ export async function requestOtp(target: string, channel: OtpChannel, req: Reque
     },
   })
 
-  // الإرسال الفعلي عبر مزود واتساب — ولو فشل بيجرّب SMS احتياطي
+  // الإرسال الفعلي — واتساب للموبايل (UltraMsg) والإيميل للبريد
   let delivered = false
   if (channel === 'whatsapp') {
     const message = `كود التحقق بتاعك لدخول Stand Out: ${code} — صالح 5 دقايق`
-    delivered = await sendWhatsApp(target, message, code)
-    if (!delivered) delivered = await sendSms(target, message)
+    delivered = await sendWhatsApp(target, message)
   } else {
     delivered = await sendEmail(target, 'كود التحقق — Stand Out', code)
   }

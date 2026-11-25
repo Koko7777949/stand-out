@@ -1,43 +1,13 @@
 import { db } from '@/lib/db'
 
 // إعدادات النظام — بتتخزن في قاعدة البيانات وبتتدار من لوحة تحكم الأدمن
-// مزودات الرسائل الحقيقية: SMSMisr للـ SMS و Resend للإيميل
-// وممكن كمان بوابة مخصصة (Victory Links أو غيرها) عبر رابط POST JSON
+// أكواد الموبايل بتبعت واتساب عبر UltraMsg — بياناته من متغيرات البيئة (ULTRAMSG_INSTANCE / ULTRAMSG_TOKEN) ومش من اللوحة
+// الإيميل: Resend (أو بوابة مخصصة POST JSON)
 export const SETTING_DEFAULTS: Record<string, string> = {
   siteName: 'Stand Out',
   tagline: 'قمة Stand Out السنوية — مكانك بين الأوائل',
   supportEmail: '',
   supportPhone: '',
-
-  // مزود واتساب — الأساسي لأكواد التحقق على الموبايل (حسب طلب صاحب الموقع)
-  // القيم: ultramsg | meta | greenapi | twilio | custom
-  whatsappProvider: 'ultramsg',
-  ultramsgInstance: '',
-  ultramsgToken: '',
-  metaWhatsappToken: '',
-  metaPhoneNumberId: '',
-  metaWhatsappTemplateName: '', // Template معتمد بمتغير {{1}} للكود — نص حر لو فاضي
-  metaWhatsappTemplateLang: 'ar',
-  greenApiInstance: '',
-  greenApiToken: '',
-  twilioAccountSid: '',
-  twilioAuthToken: '',
-  twilioWhatsappFrom: 'whatsapp:+14155238886',
-  // بوابة واتساب مخصصة (POST JSON: to / message / sender)
-  whatsappGatewayUrl: '',
-  whatsappGatewayKey: '',
-
-  // مزود SMS (احتياطي لو واتساب مش مربوط): smsmisr | custom
-  smsProvider: 'smsmisr',
-  smsMisrUsername: '',
-  smsMisrPassword: '',
-  smsMisrToken: '',
-  smsMisrSender: 'StandOut',
-  smsMisrEnvironment: '2', // 1 = بيئة تجريبية، 2 = إنتاج
-  // بوابة مخصصة (احتياطي لأي مزود تاني زي Victory Links)
-  smsGatewayUrl: '',
-  smsGatewayKey: '',
-  smsSenderName: 'StandOut',
 
   // مزود الإيميل: resend | custom
   emailProvider: 'resend',
@@ -53,6 +23,18 @@ export const SETTING_DEFAULTS: Record<string, string> = {
   // نقاط الدعوة — نقاط ثابتة لكل صديق مؤهل + مكافآت المستويات
   pointsPerReferral: '10',
 }
+
+// مفاتيح مزودات قديمة — اتشالت من اللوحة نهائيًا (واتساب/SMS بقوا من البيئة فقط)
+// أي قيم قديمة متخزنة في قاعدة البيانات بتتجاهل ومش بترجع في أي قراءة
+export const LEGACY_PROVIDER_KEYS = new Set([
+  'whatsappProvider', 'ultramsgInstance', 'ultramsgToken',
+  'metaWhatsappToken', 'metaPhoneNumberId', 'metaWhatsappTemplateName', 'metaWhatsappTemplateLang',
+  'greenApiInstance', 'greenApiToken',
+  'twilioAccountSid', 'twilioAuthToken', 'twilioWhatsappFrom',
+  'whatsappGatewayUrl', 'whatsappGatewayKey',
+  'smsProvider', 'smsMisrUsername', 'smsMisrPassword', 'smsMisrToken', 'smsMisrSender', 'smsMisrEnvironment',
+  'smsGatewayUrl', 'smsGatewayKey', 'smsSenderName',
+])
 
 // المفاتيح المسموح تعديلها من اللوحة — أي مفتاح تاني بيرفض
 export const EDITABLE_SETTING_KEYS = Object.keys(SETTING_DEFAULTS)
@@ -70,6 +52,7 @@ export async function getSettings(): Promise<Record<string, string>> {
   const out = { ...SETTING_DEFAULTS }
   for (const r of rows) {
     if (PRIVATE_SETTING_KEYS.has(r.key)) continue
+    if (LEGACY_PROVIDER_KEYS.has(r.key)) continue // مزودات واتساب/SMS بقوا من البيئة فقط
     out[r.key] = r.value
   }
   return out

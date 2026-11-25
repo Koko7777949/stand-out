@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   LayoutDashboard, Wallet, CalendarPlus, Landmark, Users, ShieldUser,
   Gift, Settings2, Loader2, RefreshCw, Check, X, Power, Trash2, Pencil,
-  Search, Plus, Send, Ban, Coins, ShieldAlert, Eye, Copy, CheckCircle2, KeyRound,
+  Search, Plus, Send, Ban, Coins, ShieldAlert, Eye, Copy, CheckCircle2, KeyRound, BadgePercent,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -42,7 +42,7 @@ type Account = {
 type PaymentRow = {
   id: string; method: string; amountMinor: number; reference: string; providerRef: string; createdAt: string
   order: {
-    id: string; status: string; holdExpiresAt: string | null
+    id: string; status: string; holdExpiresAt: string | null; promoCode: string | null
     user: { id: string; name: string; phone: string | null; email: string | null }
     ticket: { serial: string; holderName: string; governorate: string } | null
   }
@@ -67,7 +67,6 @@ type RedemptionRow = {
   reward: { id: string; name: string; pointsCost: number }
 }
 type SettingsData = Record<string, string> & {
-  smsConfigured?: boolean
   emailConfigured?: boolean
   whatsappConfigured?: boolean
   adminPasswordSet?: boolean
@@ -107,6 +106,7 @@ export function AdminPanel({ isSuper }: { isSuper: boolean }) {
             { v: 'payments', label: 'الدفعات', icon: Wallet },
             { v: 'events', label: 'الايفنتات', icon: CalendarPlus },
             { v: 'accounts', label: 'حسابات الاستلام', icon: Landmark },
+            { v: 'ambassadors', label: 'السفراء', icon: BadgePercent },
             { v: 'users', label: 'المستخدمين', icon: Users },
             ...(isSuper ? [{ v: 'admins', label: 'المسؤولين', icon: ShieldUser }] : []),
             { v: 'redemptions', label: 'الاستبدالات', icon: Gift },
@@ -127,6 +127,7 @@ export function AdminPanel({ isSuper }: { isSuper: boolean }) {
         <TabsContent value="payments"><PaymentsTab /></TabsContent>
         <TabsContent value="events"><EventsTab /></TabsContent>
         <TabsContent value="accounts"><AccountsTab /></TabsContent>
+        <TabsContent value="ambassadors"><AmbassadorsTab /></TabsContent>
         <TabsContent value="users"><UsersTab /></TabsContent>
         {isSuper && <TabsContent value="admins"><AdminsTab /></TabsContent>}
         <TabsContent value="redemptions"><RedemptionsTab /></TabsContent>
@@ -299,6 +300,12 @@ function PaymentsTab() {
                     <p className="text-xs font-bold text-muted-foreground" dir="ltr">
                       {p.order.user.phone || p.order.user.email || ''} · {p.order.ticket?.serial || p.order.id.slice(0, 10)}
                     </p>
+                    {p.order.promoCode && (
+                      <p className="text-xs font-extrabold text-grape mt-0.5 flex items-center gap-1">
+                        <BadgePercent className="h-3.5 w-3.5" aria-hidden />
+                        كود السفير: <span dir="ltr" className="font-serial">{p.order.promoCode}</span>
+                      </p>
+                    )}
                   </div>
                   <div className="text-left">
                     <p className="font-extrabold text-grape">{egp(p.amountMinor)}</p>
@@ -994,13 +1001,147 @@ function RedemptionsTab() {
   )
 }
 
+// ---------- تبويب: السفراء ----------
+type AmbassadorRow = {
+  id: string; code: string; name: string; active: boolean; uses: number; note: string | null; createdAt: string
+}
+
+function AmbassadorsTab() {
+  const [list, setList] = useState<AmbassadorRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [form, setForm] = useState({ code: '', name: '', note: '' })
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const r = await api<{ ambassadors: AmbassadorRow[] }>('/api/admin/ambassadors')
+      setList(r.ambassadors || [])
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'مشكلة في التحميل')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const add = async () => {
+    if (busy || form.code.trim().length < 3 || !form.name.trim()) return
+    setBusy(true)
+    try {
+      await api('/api/admin/ambassadors', { body: { code: form.code, name: form.name, note: form.note } })
+      setForm({ code: '', name: '', note: '' })
+      toast.success('كود السفير اتضاف.')
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'مشكلة في الإضافة')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const toggle = async (a: AmbassadorRow) => {
+    try {
+      await api('/api/admin/ambassadors', { method: 'PATCH', body: { id: a.id, active: !a.active } })
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'مشكلة في التنفيذ')
+    }
+  }
+
+  const remove = async (a: AmbassadorRow) => {
+    try {
+      await api(`/api/admin/ambassadors?id=${encodeURIComponent(a.id)}`, { method: 'DELETE' })
+      toast.success('السفير اتمسح.')
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'مشكلة في الحذف')
+    }
+  }
+
+  if (loading) return <CenterSpinner />
+
+  return (
+    <div className="space-y-5">
+      <Reveal>
+        <div className="bg-white nb rounded-2xl p-5 space-y-4">
+          <p className="font-extrabold text-sm flex items-center gap-1.5">
+            <Plus className="h-4 w-4 text-grape" aria-hidden /> ضيف كود سفير جديد
+          </p>
+          <div className="grid sm:grid-cols-3 gap-4">
+            <Field label="الكود (حروف إنجليزية/أرقام)">
+              <Input dir="ltr" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase().slice(0, 24) })} className="field font-serial" placeholder="BYF-MAZEN" autoComplete="off" />
+            </Field>
+            <Field label="اسم السفير">
+              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="field" placeholder="مازن محمد" />
+            </Field>
+            <Field label="ملاحظة (اختياري)">
+              <Input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} className="field" placeholder="فريق التسويق" />
+            </Field>
+          </div>
+          <Button
+            onClick={add}
+            disabled={busy || form.code.trim().length < 3 || !form.name.trim()}
+            className="gap-1.5 font-extrabold bg-grape text-cream border-[3px] border-ink rounded-xl shadow-[3px_3px_0_0_var(--ink)] hover:bg-grape/90 min-h-[46px] disabled:opacity-50 disabled:shadow-none"
+          >
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Plus className="h-4 w-4" aria-hidden />} إضافة السفير
+          </Button>
+          <p className="text-[11px] font-bold text-muted-foreground leading-relaxed">
+            الكود اللي بتضيفه هنا هو نفسه اللي العميل بيكتبه في مساحة &quot;كود السفير&quot; تحت طلب المراجعة وقت الدفع —
+            وكل طلب بيتسجل بالكود بيزود عدّاد الاستخدامات تلقائيًا.
+          </p>
+        </div>
+      </Reveal>
+
+      <Reveal delay={0.05}>
+        <div className="bg-white nb rounded-2xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <p className="font-extrabold text-sm">السفراء ({list.length})</p>
+            <Button variant="outline" size="sm" onClick={load} className="gap-1.5 font-bold border-2 border-ink rounded-lg bg-white hover:bg-lilac/50">
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden /> تحديث
+            </Button>
+          </div>
+          {list.length === 0 ? (
+            <p className="text-sm font-bold text-muted-foreground py-6 text-center">لسه مفيش سفراء — ضيف أول كود من فوق.</p>
+          ) : (
+            <div className="space-y-3 max-h-96 overflow-y-auto nice-scroll">
+              {list.map((a) => (
+                <div key={a.id} className="rounded-xl border-[2.5px] border-ink bg-lilac/30 p-4 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="font-serial font-extrabold text-sm" dir="ltr">{a.code}</p>
+                    <p className="text-xs font-bold text-muted-foreground mt-0.5">
+                      {a.name}{a.note ? ` · ${a.note}` : ''} · اتسجل بيه {a.uses} طلب
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`rounded-lg border-2 border-ink px-2.5 py-1 text-[11px] font-extrabold ${a.active ? 'bg-lime' : 'bg-peach'}`}>
+                      {a.active ? 'مفعّل' : 'موقوف'}
+                    </span>
+                    <Button size="sm" variant="outline" onClick={() => toggle(a)} className="gap-1.5 font-extrabold border-2 border-ink rounded-lg bg-white hover:bg-lilac/50 min-h-[40px]">
+                      <Power className="h-3.5 w-3.5" aria-hidden /> {a.active ? 'إيقاف' : 'تشغيل'}
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => remove(a)} className="gap-1.5 font-extrabold border-2 border-ink rounded-lg bg-white hover:bg-peach/50 min-h-[40px]">
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden /> حذف
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </Reveal>
+    </div>
+  )
+}
+
 // ---------- تبويب: الإعدادات ----------
 function SettingsTab({ isSuper }: { isSuper?: boolean }) {
   const [s, setS] = useState<SettingsData | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [testTarget, setTestTarget] = useState('')
-  const [testing, setTesting] = useState<'sms' | 'email' | 'whatsapp' | null>(null)
+  const [testing, setTesting] = useState<'email' | 'whatsapp' | null>(null)
   const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' })
   const [pwBusy, setPwBusy] = useState(false)
 
@@ -1026,15 +1167,6 @@ function SettingsTab({ isSuper }: { isSuper?: boolean }) {
         method: 'PUT',
         body: {
           siteName: s.siteName, tagline: s.tagline, supportEmail: s.supportEmail, supportPhone: s.supportPhone,
-          whatsappProvider: s.whatsappProvider, ultramsgInstance: s.ultramsgInstance, ultramsgToken: s.ultramsgToken,
-          metaWhatsappToken: s.metaWhatsappToken, metaPhoneNumberId: s.metaPhoneNumberId,
-          metaWhatsappTemplateName: s.metaWhatsappTemplateName, metaWhatsappTemplateLang: s.metaWhatsappTemplateLang,
-          greenApiInstance: s.greenApiInstance, greenApiToken: s.greenApiToken,
-          twilioAccountSid: s.twilioAccountSid, twilioAuthToken: s.twilioAuthToken, twilioWhatsappFrom: s.twilioWhatsappFrom,
-          whatsappGatewayUrl: s.whatsappGatewayUrl, whatsappGatewayKey: s.whatsappGatewayKey,
-          smsProvider: s.smsProvider, smsMisrUsername: s.smsMisrUsername, smsMisrPassword: s.smsMisrPassword,
-          smsMisrToken: s.smsMisrToken, smsMisrSender: s.smsMisrSender, smsMisrEnvironment: s.smsMisrEnvironment,
-          smsGatewayUrl: s.smsGatewayUrl, smsGatewayKey: s.smsGatewayKey, smsSenderName: s.smsSenderName,
           emailProvider: s.emailProvider, resendApiKey: s.resendApiKey, emailFromName: s.emailFromName,
           emailFromAddress: s.emailFromAddress, emailGatewayUrl: s.emailGatewayUrl, emailGatewayKey: s.emailGatewayKey,
           hideDevOtp: s.hideDevOtp,
@@ -1062,7 +1194,7 @@ function SettingsTab({ isSuper }: { isSuper?: boolean }) {
     }
   }
 
-  const testSend = async (channel: 'sms' | 'email' | 'whatsapp') => {
+  const testSend = async (channel: 'email' | 'whatsapp') => {
     setTesting(channel)
     try {
       await api('/api/admin/settings', { body: { channel, target: testTarget } })
@@ -1096,125 +1228,20 @@ function SettingsTab({ isSuper }: { isSuper?: boolean }) {
         <div className="bg-white nb rounded-2xl p-5 space-y-4">
           <div className="flex items-center justify-between">
             <p className="font-extrabold text-sm flex items-center gap-1.5">
-              <Send className="h-4 w-4 text-grape" aria-hidden /> مزود واتساب — أكواد الدخول برقم الموبايل (الأساسي)
+              <Send className="h-4 w-4 text-grape" aria-hidden /> قنوات إرسال أكواد التحقق
             </p>
             <span className={`rounded-lg border-2 border-ink px-2.5 py-1 text-[11px] font-extrabold ${s.whatsappConfigured ? 'bg-lime' : 'bg-peach'}`}>
-              {s.whatsappConfigured ? 'مربوط — الكود بيوصل واتساب' : 'غير مربوط — الكود بيرجع للشاشة في وضع التطوير'}
+              {s.whatsappConfigured ? 'واتساب مربوط — الأكواد بتوصل واتساب' : 'واتساب غير مربوط — الأكواد بتظهر في وضع التطوير'}
             </span>
           </div>
-          <Field label="المزود">
-            <Select value={s.whatsappProvider || 'ultramsg'} onValueChange={(v) => upd('whatsappProvider', v)}>
-              <SelectTrigger className="field" aria-label="مزود واتساب"><SelectValue /></SelectTrigger>
-              <SelectContent className="border-[2.5px] border-ink rounded-xl">
-                <SelectItem value="ultramsg">UltraMsg — سهل وسريع لحساب واتساب عادي</SelectItem>
-                <SelectItem value="meta">Meta WhatsApp Cloud API — الرسمي</SelectItem>
-                <SelectItem value="greenapi">Green API</SelectItem>
-                <SelectItem value="twilio">Twilio WhatsApp</SelectItem>
-                <SelectItem value="custom">بوابة مخصصة (POST JSON)</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-
-          {(s.whatsappProvider || 'ultramsg') === 'ultramsg' && (
-            <div className="grid sm:grid-cols-2 gap-4">
-              <Field label="Instance ID (رقم النسخة)"><Input dir="ltr" value={s.ultramsgInstance || ''} onChange={(e) => upd('ultramsgInstance', e.target.value)} className="field" placeholder="instance12345" autoComplete="off" /></Field>
-              <Field label="UltraMsg Token"><Input type="password" dir="ltr" value={s.ultramsgToken || ''} onChange={(e) => upd('ultramsgToken', e.target.value)} className="field" autoComplete="new-password" /></Field>
-              <p className="sm:col-span-2 text-[11px] font-bold text-muted-foreground leading-relaxed">
-                من حسابك على ultramsg.com: خد Instance ID و Token من صفحة Instances — والأرقام بتتبعت تلقائيًا بالصيغة الدولية (01200506224 ← 201200506224).
-              </p>
-            </div>
-          )}
-          {(s.whatsappProvider || 'ultramsg') === 'meta' && (
-            <div className="grid sm:grid-cols-2 gap-4">
-              <Field label="WhatsApp Business Token"><Input type="password" dir="ltr" value={s.metaWhatsappToken || ''} onChange={(e) => upd('metaWhatsappToken', e.target.value)} className="field" autoComplete="new-password" /></Field>
-              <Field label="Phone Number ID"><Input dir="ltr" value={s.metaPhoneNumberId || ''} onChange={(e) => upd('metaPhoneNumberId', e.target.value)} className="field" autoComplete="off" /></Field>
-              <Field label="اسم Template معتمد (اختياري)"><Input dir="ltr" value={s.metaWhatsappTemplateName || ''} onChange={(e) => upd('metaWhatsappTemplateName', e.target.value)} className="field" placeholder="otp_code" /></Field>
-              <Field label="لغة الـ Template"><Input dir="ltr" value={s.metaWhatsappTemplateLang || 'ar'} onChange={(e) => upd('metaWhatsappTemplateLang', e.target.value)} className="field" placeholder="ar" /></Field>
-              <p className="sm:col-span-2 text-[11px] font-bold text-muted-foreground leading-relaxed">
-                لو فاضي خانة Template بنبعت نص حر (بيوصل لو المستخدم كلّم الرقم قبلها بـ 24 ساعة) — للمستخدمين الجدد اعتمد Template جسمه متغير {'{{1}}'} وهو بياخد الكود.
-              </p>
-            </div>
-          )}
-          {(s.whatsappProvider || 'ultramsg') === 'greenapi' && (
-            <div className="grid sm:grid-cols-2 gap-4">
-              <Field label="Green API Instance ID"><Input dir="ltr" value={s.greenApiInstance || ''} onChange={(e) => upd('greenApiInstance', e.target.value)} className="field" autoComplete="off" /></Field>
-              <Field label="Green API Token"><Input type="password" dir="ltr" value={s.greenApiToken || ''} onChange={(e) => upd('greenApiToken', e.target.value)} className="field" autoComplete="new-password" /></Field>
-            </div>
-          )}
-          {(s.whatsappProvider || 'ultramsg') === 'twilio' && (
-            <div className="grid sm:grid-cols-2 gap-4">
-              <Field label="Account SID"><Input dir="ltr" value={s.twilioAccountSid || ''} onChange={(e) => upd('twilioAccountSid', e.target.value)} className="field" placeholder="AC..." autoComplete="off" /></Field>
-              <Field label="Auth Token"><Input type="password" dir="ltr" value={s.twilioAuthToken || ''} onChange={(e) => upd('twilioAuthToken', e.target.value)} className="field" autoComplete="new-password" /></Field>
-              <Field label="رقم الواتساب المرسل"><Input dir="ltr" value={s.twilioWhatsappFrom || ''} onChange={(e) => upd('twilioWhatsappFrom', e.target.value)} className="field" placeholder="whatsapp:+14155238886" /></Field>
-            </div>
-          )}
-          {(s.whatsappProvider || 'ultramsg') === 'custom' && (
-            <div className="grid sm:grid-cols-3 gap-4">
-              <div className="sm:col-span-3">
-                <Field label="رابط البوابة (POST JSON — to / message / sender)">
-                  <Input dir="ltr" value={s.whatsappGatewayUrl || ''} onChange={(e) => upd('whatsappGatewayUrl', e.target.value)} className="field" placeholder="https://your-gateway.example.com/api/send" />
-                </Field>
-              </div>
-              <Field label="مفتاح البوابة (Bearer)"><Input type="password" dir="ltr" value={s.whatsappGatewayKey || ''} onChange={(e) => upd('whatsappGatewayKey', e.target.value)} className="field" placeholder="••••••" /></Field>
-            </div>
-          )}
-        </div>
-      </Reveal>
-
-      <Reveal delay={0.06}>
-        <div className="bg-white nb rounded-2xl p-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="font-extrabold text-sm flex items-center gap-1.5">
-              <Send className="h-4 w-4 text-grape" aria-hidden /> احتياطي — مزود SMS لو واتساب مش مربوط
-            </p>
-            <span className={`rounded-lg border-2 border-ink px-2.5 py-1 text-[11px] font-extrabold ${s.smsConfigured ? 'bg-lime' : 'bg-peach'}`}>
-              {s.smsConfigured ? 'مربوطة' : 'غير مربوطة — أكواد بتظهر في وضع التطوير'}
-            </span>
-          </div>
-          <Field label="المزود">
-            <Select value={s.smsProvider || 'smsmisr'} onValueChange={(v) => upd('smsProvider', v)}>
-              <SelectTrigger className="field" aria-label="مزود الـ SMS"><SelectValue /></SelectTrigger>
-              <SelectContent className="border-[2.5px] border-ink rounded-xl">
-                <SelectItem value="smsmisr">SMSMisr — مزود مصري (رصيد تجريبي مجاني)</SelectItem>
-                <SelectItem value="custom">بوابة مخصصة (Victory Links أو غيرها)</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-
-          {(s.smsProvider || 'smsmisr') === 'smsmisr' ? (
-            <div className="grid sm:grid-cols-2 gap-4">
-              <Field label="Username"><Input dir="ltr" value={s.smsMisrUsername || ''} onChange={(e) => upd('smsMisrUsername', e.target.value)} className="field" autoComplete="off" /></Field>
-              <Field label="Password"><Input type="password" dir="ltr" value={s.smsMisrPassword || ''} onChange={(e) => upd('smsMisrPassword', e.target.value)} className="field" autoComplete="new-password" /></Field>
-              <Field label="Token (API Key)"><Input type="password" dir="ltr" value={s.smsMisrToken || ''} onChange={(e) => upd('smsMisrToken', e.target.value)} className="field" autoComplete="new-password" /></Field>
-              <Field label="اسم المرسل (Sender)"><Input dir="ltr" value={s.smsMisrSender || ''} onChange={(e) => upd('smsMisrSender', e.target.value)} className="field" /></Field>
-              <Field label="البيئة">
-                <Select value={s.smsMisrEnvironment || '2'} onValueChange={(v) => upd('smsMisrEnvironment', v)}>
-                  <SelectTrigger className="field" aria-label="بيئة SMSMisr"><SelectValue /></SelectTrigger>
-                  <SelectContent className="border-[2.5px] border-ink rounded-xl">
-                    <SelectItem value="1">تجريبية (environment = 1)</SelectItem>
-                    <SelectItem value="2">إنتاج (environment = 2)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <p className="sm:col-span-2 text-[11px] font-bold text-muted-foreground leading-relaxed">
-                الأرقام بتتبعت بصيغة دولية تلقائيًا (01200506224 ← 201200506224)، والرسائل العربية بتتبعت Unicode تلقائيًا.
-              </p>
-            </div>
-          ) : (
-            <div className="grid sm:grid-cols-3 gap-4">
-              <div className="sm:col-span-3">
-                <Field label="رابط البوابة (POST JSON — to / message / sender)">
-                  <Input dir="ltr" value={s.smsGatewayUrl || ''} onChange={(e) => upd('smsGatewayUrl', e.target.value)} className="field" placeholder="https://your-provider.example.com/api/send" />
-                </Field>
-              </div>
-              <Field label="مفتاح البوابة (Bearer)"><Input type="password" dir="ltr" value={s.smsGatewayKey || ''} onChange={(e) => upd('smsGatewayKey', e.target.value)} className="field" placeholder="••••••" /></Field>
-              <Field label="اسم المرسل"><Input dir="ltr" value={s.smsSenderName || ''} onChange={(e) => upd('smsSenderName', e.target.value)} className="field" /></Field>
-            </div>
-          )}
-
+          <p className="text-xs font-bold text-muted-foreground leading-relaxed">
+            كود الدخول على الموبايل بيوصل رسالة واتساب على الرقم اللي الموقع عايز يتحقق منه — بدون SMS.
+            الإرسال شغال عبر UltraMsg وبياناته بتتظبط من متغيرات البيئة على السيرفر (ULTRAMSG_INSTANCE و ULTRAMSG_TOKEN) ومش من اللوحة.
+            أكواد الإيميل بتتبعت عبر مزود الإيميل اللي تحت.
+          </p>
           <label className="flex items-center gap-3 text-sm font-bold">
             <Switch checked={s.hideDevOtp === '1'} onCheckedChange={(v) => upd('hideDevOtp', v ? '1' : '0')} aria-label="إخفاء أكواد التطوير" />
-            اخفِ أكواد التحقق من الشاشة (فعّلها بعد ما تربط المزود الحقيقي)
+            اخفِ أكواد التحقق من الشاشة (فعّلها بعد ما تربط UltraMsg من البيئة)
           </label>
         </div>
       </Reveal>
@@ -1307,9 +1334,6 @@ function SettingsTab({ isSuper }: { isSuper?: boolean }) {
             />
             <Button onClick={() => testSend('whatsapp')} disabled={testing !== null || !testTarget} variant="outline" className="gap-1.5 font-extrabold border-[2.5px] border-ink rounded-xl bg-white hover:bg-lime/40 min-h-[48px]">
               {testing === 'whatsapp' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />} تجربة واتساب
-            </Button>
-            <Button onClick={() => testSend('sms')} disabled={testing !== null || !testTarget} variant="outline" className="gap-1.5 font-extrabold border-[2.5px] border-ink rounded-xl bg-white hover:bg-lime/40 min-h-[48px]">
-              {testing === 'sms' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />} تجربة SMS
             </Button>
             <Button onClick={() => testSend('email')} disabled={testing !== null || !testTarget} variant="outline" className="gap-1.5 font-extrabold border-[2.5px] border-ink rounded-xl bg-white hover:bg-lime/40 min-h-[48px]">
               {testing === 'email' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />} تجربة إيميل

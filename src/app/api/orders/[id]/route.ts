@@ -25,6 +25,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       currency: order.currency,
       holdExpiresAt: order.holdExpiresAt?.toISOString() || null,
       paymentMethod: order.paymentMethod,
+      promoCode: order.promoCode,
       paidAt: order.paidAt?.toISOString() || null,
       eventName: order.event.name,
       startsAt: order.event.startsAt.toISOString(),

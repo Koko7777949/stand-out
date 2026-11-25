@@ -44,6 +44,7 @@ export async function GET(req: Request) {
         id: p.order.id,
         status: p.order.status,
         holdExpiresAt: p.order.holdExpiresAt?.toISOString() || null,
+        promoCode: p.order.promoCode,
         user: p.order.user,
         ticket: p.order.ticket,
       },

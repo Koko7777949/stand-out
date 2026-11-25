@@ -74,10 +74,6 @@ async function main() {
     tagline: 'قمةStand Out السنوية — مكانك بين الأوائل',
     supportEmail: 'support@standout.app',
     supportPhone: '01000000000',
-    // بوابة SMS العامة — الأدمن بيحط رابط مزود الرسائل ومفتاحه من اللوحة
-    smsGatewayUrl: '',
-    smsGatewayKey: '',
-    smsSenderName: 'StandOut',
     // بوابة الإيميل العامة (متوافقة مع Resend وغيرها بنفس الشكل)
     emailGatewayUrl: '',
     emailGatewayKey: '',
@@ -87,6 +83,19 @@ async function main() {
   }
   for (const [key, value] of Object.entries(defaults)) {
     await db.setting.upsert({ where: { key }, update: {}, create: { key, value } })
+  }
+
+  // ---- السفراء (أكواد البرومو — بتتكتب في طلب المراجعة وقت الدفع) ----
+  const ambassadors = [
+    { code: 'BYF-MAZEN', name: 'مازن — فريق السفراء', note: 'كود تجريبي جاهز للاختبار' },
+    { code: 'BYF-SARA', name: 'سارة — فريق السفراء', note: 'كود تجريبي جاهز للاختبار' },
+  ]
+  for (const a of ambassadors) {
+    await db.ambassador.upsert({
+      where: { code: a.code },
+      update: {},
+      create: a,
+    })
   }
 
   // ---- مستويات النقاط ----

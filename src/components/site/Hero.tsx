@@ -60,6 +60,12 @@ export function Hero({
   const stubRef = useRef<HTMLDivElement>(null)
   const [qr, setQr] = useState<string | null>(null)
 
+  // التاريخ بيتقري من بيانات الايفنت اللي الأدمن بيظبطها من اللوحة
+  const eventDateObj = new Date(eventDate)
+  const dateLabel = isNaN(eventDateObj.getTime())
+    ? 'السبت 21 نوفمبر 2026'
+    : new Intl.DateTimeFormat('ar-EG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(eventDateObj)
+
   // QR حقيقي للكوبون — بيوصل على نفس الصفحة عشان يتسجل من موبايله
   useEffect(() => {
     QRCode.toDataURL(window.location.origin + '/', {
@@ -150,7 +156,7 @@ export function Hero({
           <ul className="mt-7 space-y-3.5 max-w-xl">
             <li className="flex items-center gap-3">
               <IconCalendar />
-              <time dateTime="2026-11-21" className="font-bold">السبت 21 نوفمبر 2026</time>
+              <time dateTime={eventDate} className="font-bold">{dateLabel}</time>
             </li>
             <li className="flex items-center gap-3">
               <IconClock />
@@ -202,7 +208,7 @@ export function Hero({
               <div className="p-5">
                 <div className="flex items-center justify-between text-sm font-bold border-b-2 border-dashed border-ink/30 pb-3">
                   <span>الموعد</span>
-                  <span>السبت 21 نوفمبر 2026</span>
+                  <span>{dateLabel}</span>
                 </div>
                 <div className="flex items-center justify-between text-sm font-bold border-b-2 border-dashed border-ink/30 py-3">
                   <span>المكان</span>
